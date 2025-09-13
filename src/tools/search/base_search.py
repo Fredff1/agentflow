@@ -5,7 +5,8 @@ import aiohttp
 from aiohttp import ClientTimeout
 
 from .backend.base import SearchBackend
-from ..base import BaseTool
+from ..base import BaseTool, ToolCallRequest, ToolCallResult
+from ...agent.summary.interface import SummarizerInterface
 
 def _run_coroutine_blocking(coro):
     try:
@@ -49,7 +50,7 @@ class AsyncSearchTool(BaseTool):
         detail_concurrency: int = 3,
         max_length: int = 10000,
         enable_summarize: bool = False,
-        summarize_engine: Any = None,  
+        summarize_engine: SummarizerInterface = None,  
         config: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(config=config)
@@ -66,33 +67,59 @@ class AsyncSearchTool(BaseTool):
         self.summarize_engine = summarize_engine
 
     # --- public sync API (single) ---
-    def run_one(self, content: Any, *, context: Any = None, **kwargs: Any) -> Tuple[Any, Dict[str, Any]]:
-        query = str(content)
+    def run_one(self, call: ToolCallRequest, **kwargs: Any) -> ToolCallResult:
+        query = str(call.content)
         results = _run_coroutine_blocking(self._run_batch_async([query]))
         text = results[0]["formatted"]
         meta = results[0]["meta"]
+        meta.update(call.meta)
+        final_content = text
         # optional summarization
         if self.enable_summarize and self.summarize_engine:
             summary, summarize_meta = self.summarize_engine.summarize(text, query)
             meta.update(summarize_meta or {})
-            return summary, meta
-        return text, meta
+            final_content = summary
+        result = ToolCallResult(
+            tool_name=self.name,
+            request_content=query,
+            output=final_content,
+            meta=meta,
+            error=None,
+            index=call.index,
+            call=call,
+        )
+        return result
 
     # --- public sync API (batch) ---
-    def run_batch(self, contents: List[Any], *, contexts: Optional[List[Any]] = None, **kwargs: Any):
-        queries = [str(x) for x in contents]
+    def run_batch(self, calls: List[ToolCallRequest], **kwargs: Any) -> List[ToolCallResult]:
+        queries = [str(call.content) for call in calls]
         results = _run_coroutine_blocking(self._run_batch_async(queries))
         outs = [r["formatted"] for r in results]
         metas = [r["meta"] for r in results]
+        for meta, call in zip(metas,calls):
+            meta.update(call.meta)
 
         if self.enable_summarize and self.summarize_engine:
             qs = queries
             raw_texts = outs
-            summaries, summarize_metas = self.summarize_engine.batch_summarize(raw_texts, qs, user_prompts=None)
+            summaries, summarize_metas = self.summarize_engine.summarize_batch(raw_texts, qs, user_prompts=None)
             outs = summaries
-            for m, sm in zip(metas, summarize_metas):
-                m.update(sm or {})
-        return outs, metas
+            for m, summarize_meta, raw_text in zip(metas, summarize_metas, raw_texts):
+                m.update(summarize_meta or {})
+                m.update({"raw":raw_texts})
+        results: List[ToolCallResult] = []
+        for call, out, meta in zip(calls, outs, metas):
+            results.append(ToolCallResult(
+                tool_name=self.name,
+                request_content=call.content,
+                output=out,
+                meta=meta,
+                error=None,
+                index=call.index,
+                call=call,
+            ))
+                
+        return results
 
     async def _run_batch_async(self, queries: List[str]) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []

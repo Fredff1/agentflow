@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..core.interfaces import CanGenerate,SupportChatTemplate
 from ..utils.log_util import get_logger
+from ..utils.chat_template import is_chat_messages
 
 class OpenaiBackend(CanGenerate):
     
@@ -33,6 +34,8 @@ class OpenaiBackend(CanGenerate):
         input_messages = prompts
         if all([isinstance(prompt,str) for prompt in prompts]):
             input_messages = [[{"role":"user","content":prompt}] for prompt in prompts]
+        else:
+            assert is_chat_messages(input_messages), "Prompt must be str or chat message"
         max_worker = min(len(prompts),self.max_concurrency)
         with ThreadPoolExecutor(max_workers=max_worker) as executor:
             future_to_idx = {

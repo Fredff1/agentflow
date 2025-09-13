@@ -1,5 +1,5 @@
 # src/backends/hybrid_backend.py
-from typing import List, Tuple, Dict, Any, Sequence
+from typing import List, Tuple, Dict, Any, Sequence, Union
 from logging import Logger
 import math
 
@@ -8,6 +8,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from ..utils.log_util import get_logger
+from ..utils.chat_template import is_chat_messages, safe_apply_chat_template
 from ..core.interfaces import CanGenerate, CanChoiceProbs,SupportChatTemplate
 
 class VllmChoiceLogitsBackend(CanGenerate, CanChoiceProbs,SupportChatTemplate):
@@ -46,14 +47,16 @@ class VllmChoiceLogitsBackend(CanGenerate, CanChoiceProbs,SupportChatTemplate):
     def apply_chat_template(self, messages: List[Dict[str,str]], 
                             tokenize=False, 
                             add_generation_prompt=True, 
-                            **additional_params) -> str:
-        tokens = self.tokenizer.apply_chat_template(
-            messages, 
+                            **additional_params) -> Union[str,Any]:
+        result, _ = safe_apply_chat_template(
+            self.tokenizer,
+            messages=messages,
             tokenize = tokenize,
             add_generation_prompt = add_generation_prompt,
-            **additional_params)
-        return tokens  
+            **additional_params
+        )
 
+        return result
     def _parse_config(self):
         backend_config = self.config["backend"]
         self.backend_config = {
@@ -69,6 +72,9 @@ class VllmChoiceLogitsBackend(CanGenerate, CanChoiceProbs,SupportChatTemplate):
         if kwargs:
             sp = SamplingParams(**{**sp.__dict__, **kwargs})
 
+        if is_chat_messages(prompts):
+            prompts = self.apply_chat_template(prompts)
+        
         results = self.vllm.generate(prompts=prompts, sampling_params=self.sampling_params)
         texts = [r.outputs[0].text if r.outputs else "" for r in results]
         metas = [{"raw_output": r} for r in results]

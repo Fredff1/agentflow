@@ -1,5 +1,5 @@
 # src/core/interfaces.py
-from typing import List, Tuple, Dict, Any, Protocol, Sequence
+from typing import List, Tuple, Dict, Any, Protocol, Sequence, Union
 from abc import ABC, abstractmethod
 from .types import Query, Rollout, Verdict
 
@@ -10,7 +10,7 @@ class LLMBackend(ABC):
 
 class SupportChatTemplate(Protocol):
     def apply_chat_template(self, messages: List[Dict[str,str]], tokenize=False, 
-                            add_generation_prompt=True, **additional_params) -> str:...
+                            add_generation_prompt=True, **additional_params) -> Union[str,Any]:...
 
 class CanGenerate(Protocol):
     def generate(self, prompts: List, extra: List[Dict] = None, **kwargs) -> Tuple[List[str],List[Dict]]:...

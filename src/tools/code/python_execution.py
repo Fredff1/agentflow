@@ -23,7 +23,7 @@ import math
 from sympy import symbols, Eq, solve
 from scipy import optimize
 
-from ..base import BaseTool  # ← 按你的工程相对路径导入
+from ..base import BaseTool, ToolCallRequest, ToolCallResult
 # 如果需要日志：from utils.log_util import get_logger
 
 
@@ -221,17 +221,36 @@ class PythonExecutionTool(BaseTool):
             timeout_length=timeout_length,
         )
 
-    def run_one(self, content: Any, *, context: Any = None, **kwargs: Any):
-        code_text = str(content)
+    def run_one(self, call: ToolCallRequest, **kwargs: Any) -> ToolCallResult:
+        code_text = str(call.content)
         result, report = self.executor.apply(code_text)
         meta = {
             "success": report.startswith("Execution Success"),
             "report": report,
         }
-        return {"result": result, "report": report}, meta
+        result = ToolCallResult(
+            tool_name=self.name,
+            request_content=call.content,
+            output=f"Console: {result}\n Report: {report}",
+            meta=meta,
+            error=None,
+            index =call.index,
+            call=call,
+        )
+        return result
 
-    def run_batch(self, contents: List[Any], *, contexts: Optional[List[Any]] = None, **kwargs: Any):
-        results = self.executor.batch_apply([str(x) for x in contents])
-        outs = [{"result": r, "report": rep} for (r, rep) in results]
+    def run_batch(self, calls: List[ToolCallRequest], **kwargs: Any) -> List[ToolCallResult]:
+        results = self.executor.batch_apply([str(call.content) for call in calls])
         metas = [{"success": rep.startswith("Execution Success"), "report": rep} for (_, rep) in results]
-        return outs, metas
+        final_results: List[ToolCallResult] = []
+        for (result, report), call, meta in zip(results,calls,metas):
+            final_results.append(ToolCallResult(
+                tool_name=self.name,
+                request_content=call.content,
+                output=f"Console: {result}\n Report: {report}",
+                meta=meta,
+                error=None,
+                index=call.index,
+                call=call,
+            ))
+        return final_results

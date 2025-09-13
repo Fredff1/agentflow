@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional, Tuple
 
-from .base import ToolParser, ToolCall
+from .base import ToolParser, ToolCallRequest
 from ..utils.tag_util import find_tags
 
 class TagToolParser(ToolParser):
@@ -10,13 +10,13 @@ class TagToolParser(ToolParser):
         self.tool_tags = tool_tags
         
 
-    def parse(self, text: str, meta: Dict=None) -> List[ToolCall]:
+    def parse(self, text: str, meta: Dict=None) -> List[ToolCallRequest]:
         if not meta:
             meta = {}
         matches = find_tags(text,self.tool_tags)
-        calls: List[ToolCall] = []
+        calls: List[ToolCallRequest] = []
         for idx, match in enumerate(matches):
-            call = ToolCall(
+            call = ToolCallRequest(
                 index=idx,
                 name = match.tag,
                 content=match.body,

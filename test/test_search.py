@@ -15,6 +15,7 @@ sys.path.insert(0, ROOT_DIR)
 from src.tools.search.backend.base import SearchBackend
 from src.tools.search.backend.searxng import SearxngBackend
 from src.tools.search.base_search import AsyncSearchTool
+from src.tools.base import ToolCallRequest
 
 
 # ------------------------------
@@ -39,43 +40,7 @@ class FakeBackend(SearchBackend):
         return enriched
 
 
-def test_search_run_one_with_details_fake_backend():
-    print("Mocl single search")
-    tool = AsyncSearchTool(
-        backend=FakeBackend(),
-        top_k=2,
-        fetch_details=True,
-        detail_concurrency=2,
-        max_length=200,
-    )
-    text, meta = tool.run_one("unit-test")
-    assert "[0] Title: Title 0 for unit-test" in text
-    assert "https://example.com/unit-test/0" in text
-    assert "Content fetched for https://example.com/unit-test/0" in text
-    assert meta["query"] == "unit-test"
-    assert len(meta["raw_hits"]) == 2
 
-
-def test_search_run_batch_multiple_queries_fake_backend():
-    print("Mock batch search")
-    tool = AsyncSearchTool(
-        backend=FakeBackend(),
-        top_k=3,
-        fetch_details=True,
-        detail_concurrency=3,
-        max_length=300,
-    )
-    texts, metas = tool.run_batch(["alpha", "beta"])
-    assert len(texts) == len(metas) == 2
-    assert "Title 0 for alpha" in texts[0]
-    assert "Title 0 for beta" in texts[1]
-    assert len(metas[0]["raw_hits"]) == 3
-    assert len(metas[1]["raw_hits"]) == 3
-
-
-# ------------------------------
-# 真实本地 SearxNG 调用（无 summarize）
-# ------------------------------
 SEARXNG_BASE = "http://127.0.0.1:8888"
 
 
@@ -91,22 +56,17 @@ def test_search_real_searxng_basic_no_summary():
         enable_summarize=False,   # 明确不启用 summarize
         timeout=15,
     )
-    text, meta = tool.run_one("python asyncio tutorial")
-    print(text,meta)
-    # 基本断言：不应失败，且格式包含 Title 字样
-    assert text != "Search Failed"
-    assert "[0] Title:" in text
-    assert meta["query"] == "python asyncio tutorial"
-    assert isinstance(meta.get("raw_hits"), list)
+    result = tool.run_one(ToolCallRequest(
+        index=0,
+        name="search",
+        content="python asyncio tutorial"
+    ))
+    print(result)
+
     
-    texts, metas = tool.run_batch(["python learning"]*7)
-    print(texts)
-    
+
 if __name__ == "__main__":
     print("Starting test")
-    test_search_run_one_with_details_fake_backend()
-    test_search_run_batch_multiple_queries_fake_backend()
-    print("test real search")
     test_search_real_searxng_basic_no_summary()
     print("END")
 

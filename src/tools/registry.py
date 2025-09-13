@@ -7,8 +7,8 @@ class ToolRegistry:
         self._tools: Dict[str, BaseTool] = {}
 
 
-    def register(self, name: str, tool: BaseTool) -> None:
-        self._tools[name] = tool
+    def register(self,tool: BaseTool) -> None:
+        self._tools[tool.name] = tool
 
 
     def get(self, name: str) -> Optional[BaseTool]:

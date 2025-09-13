@@ -1,4 +1,4 @@
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Union
 from logging import Logger
 
 
@@ -6,6 +6,7 @@ from vllm import LLM, SamplingParams
 
 from ..core.interfaces import CanGenerate,SupportChatTemplate
 from ..utils.log_util import get_logger
+from ..utils.chat_template import is_chat_messages, safe_apply_chat_template
 
 class VllmBackend(CanGenerate, SupportChatTemplate):
     
@@ -39,15 +40,22 @@ class VllmBackend(CanGenerate, SupportChatTemplate):
     def apply_chat_template(self, messages: List[Dict[str,str]], 
                             tokenize=False, 
                             add_generation_prompt=True, 
-                            **additional_params) -> str:
-        tokens = self.tokenizer.apply_chat_template(
-            messages, 
+                            **additional_params) -> Union[str,Any]:
+        result, _ = safe_apply_chat_template(
+            self.tokenizer,
+            messages=messages,
             tokenize = tokenize,
             add_generation_prompt = add_generation_prompt,
-            **additional_params)
-        return tokens  
+            **additional_params
+        )
+
+        return result
     
     def generate(self, prompts: List, extra: List[Dict] = None, **kwargs) -> Tuple[List[str],List[Dict]]:
+        
+        if is_chat_messages(prompts):
+            prompts = self.apply_chat_template(prompts)
+        
         outputs = self.engine.generate(
             prompts=prompts,
             sampling_params=self.sampling_params,
