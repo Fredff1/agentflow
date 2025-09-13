@@ -7,7 +7,7 @@ from vllm import LLM, SamplingParams
 from ..core.interfaces import CanGenerate,SupportChatTemplate
 from ..utils.log_util import get_logger
 
-class VllmBackend(CanGenerate):
+class VllmBackend(CanGenerate, SupportChatTemplate):
     
     def __init__(self, config: Dict[str,Any], logger: Logger = None, **kwargs):
         super().__init__()

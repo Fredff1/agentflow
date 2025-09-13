@@ -2,7 +2,7 @@ import json
 import jsonlines
 import re
 
-from typing import List, Dict
+from typing import List, Dict, Any
 
 
 
@@ -22,12 +22,11 @@ class JsonUtil:
 
             
     @staticmethod
-    def parse_json(text:str,log_error:bool = False)->List[Dict] | None:
+    def parse_json(text:str)->List[Any] | None:
         """Read and parse all json in the given text
 
         Args:
             text (str): input text
-            log_error (bool, optional): whether to print failures. Defaults to False.
 
         Returns:
             list[dict] | None: json item
@@ -44,13 +43,8 @@ class JsonUtil:
                     # parse json object
                     json_data = json.loads(each_mach)
                     json_list.append(json_data)
-                except json.JSONDecodeError as e:
-                    if log_error:
-                        print(f"Error parsing json: {e}, skipping")
-                    
-        else:
-            if log_error:
-                print("Failed to find json items in the given text")
+                except:
+                    pass
         return json_list
      
 

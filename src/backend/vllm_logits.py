@@ -11,17 +11,12 @@ from ..utils.log_util import get_logger
 from ..core.interfaces import CanGenerate, CanChoiceProbs,SupportChatTemplate
 
 class VllmChoiceLogitsBackend(CanGenerate, CanChoiceProbs,SupportChatTemplate):
-    """
-    vLLM for high-throughput generation; HF for logits/choice/continuation/RM.
-    要求 vLLM 和 HF 使用同一模型（相同词表），以保证 token 对齐。
-    """
 
     def __init__(self, config: Dict[str, Any], logger: Logger | None = None, **kwargs):
         self.config = config
         self.logger = logger or get_logger(config, __name__)
         self._parse_config()
 
-        # --- vLLM 生成引擎 ---
         self.sampling_params = SamplingParams(
             temperature=self.sampling_config.get("temperature", 1.0),
             max_tokens=self.sampling_config.get("max_tokens", 1024),
@@ -38,9 +33,8 @@ class VllmChoiceLogitsBackend(CanGenerate, CanChoiceProbs,SupportChatTemplate):
             trust_remote_code=True,
         )
 
-        # --- HF logits/RM 引擎 ---
         hf_dtype = self.hf_config.get("torch_dtype", "auto")
-        torch_dtype = "auto" if hf_dtype == "auto" else getattr(torch, hf_dtype)  # e.g., torch.float16
+        torch_dtype = "auto" if hf_dtype == "auto" else getattr(torch, hf_dtype) 
         self.tokenizer = AutoTokenizer.from_pretrained(self.backend_config["model_path"], use_fast=True, trust_remote_code=True)
         self.lm  = AutoModelForCausalLM.from_pretrained(
             self.backend_config["model_path"],
@@ -70,9 +64,7 @@ class VllmChoiceLogitsBackend(CanGenerate, CanChoiceProbs,SupportChatTemplate):
         self.vllm_config = backend_config.get("vllm", {})
         self.hf_config = backend_config.get("hf", {"device":"cuda","torch_dtype":"auto"})
 
-    # ============ 生成（vLLM） ============
     def generate(self, prompts: List[str], extra: List[Dict] | None = None, **kwargs) -> Tuple[List[str], List[Dict]]:
-        # 允许运行时覆盖 sampling
         sp = self.sampling_params
         if kwargs:
             sp = SamplingParams(**{**sp.__dict__, **kwargs})
@@ -88,21 +80,16 @@ class VllmChoiceLogitsBackend(CanGenerate, CanChoiceProbs,SupportChatTemplate):
     def choice_probs(self,
                     prefixes: Sequence[str],
                     choices: Sequence[Sequence[str]],
-                    normalize: str = "sum"  # "sum"=整段logprob；也可用 "avg" 按长度归一
+                    normalize: str = "sum"  
                     ) -> List[List[float]]:
-        """
-        对每个 prefix，计算整段 choice（可能多token）的条件概率 p(choice | prefix)。
-        返回每个 prefix 下按 choices 归一化后的概率分布。
-        """
-        device = self.lm.device  # 若你的成员名是 self.lm，请改这里
+        device = self.lm.device  
         bos_id = getattr(self.tokenizer, "bos_token_id", None)
 
         all_group_probs: List[List[float]] = []
         for prefix, choice_list in zip(prefixes, choices):
-            # 1) 编码 prefix（不加 special token，避免重复 BOS）
             prefix_ids = self.tokenizer(prefix, add_special_tokens=False).input_ids
 
-            # 2) 为该 prefix 构造一批 (prefix + choice) 序列，并在 labels 里只标注 choice 段
+           
             input_id_batches = []
             label_batches = []
             choice_token_lens = []
@@ -113,7 +100,6 @@ class VllmChoiceLogitsBackend(CanGenerate, CanChoiceProbs,SupportChatTemplate):
 
                 if bos_id is not None:
                     full_ids = [bos_id] + prefix_ids + choice_ids
-                    # 只在 choice 段打分：前面位置标签置 -100
                     labels = [-100] * (1 + len(prefix_ids)) + choice_ids[:]
                 else:
                     full_ids = prefix_ids + choice_ids
@@ -122,7 +108,6 @@ class VllmChoiceLogitsBackend(CanGenerate, CanChoiceProbs,SupportChatTemplate):
                 input_id_batches.append(full_ids)
                 label_batches.append(labels)
 
-            # 3) padding 到同长度，喂给模型
             max_len = max(len(ids) for ids in input_id_batches)
             padded_input_ids, padded_labels, attention_masks = [], [], []
 
@@ -136,61 +121,48 @@ class VllmChoiceLogitsBackend(CanGenerate, CanChoiceProbs,SupportChatTemplate):
             labels_tensor = torch.tensor(padded_labels, dtype=torch.long, device=device)
             attention_mask_tensor = torch.tensor(attention_masks, dtype=torch.long, device=device)
 
-            # 4) 前向：cross-entropy loss 是“有效位置的平均 NLL”
             outputs = self.lm(input_ids=input_ids_tensor,
                                         attention_mask=attention_mask_tensor,
                                         labels=labels_tensor)
-            # 平均 NLL * 有效 token 数 = 总 NLL
-            # 有效 token 数就是各 choice 的 token 数（labels != -100 的数量）
-            valid_counts = (labels_tensor != -100).sum(dim=1).to(torch.float32)  # [B]
-            # 可能有空 choice 的极端情况，保护
+
+            valid_counts = (labels_tensor != -100).sum(dim=1).to(torch.float32) 
             valid_counts = torch.clamp(valid_counts, min=1.0)
 
-            avg_nll = outputs.loss  # 标量 or [B]? transformers返回标量均值；我们改为逐样本 NLL：
-            # 为了逐样本更精确，手动算 token 级 NLL：
+            avg_nll = outputs.loss  
             with torch.no_grad():
                 logits = self.lm(input_ids=input_ids_tensor,
-                                            attention_mask=attention_mask_tensor).logits  # [B, T, V]
-                log_probs = torch.log_softmax(logits[:, :-1, :], dim=-1)  # 对下一个token
-                # 右移 labels，与 logits 对齐
+                                            attention_mask=attention_mask_tensor).logits  
+                log_probs = torch.log_softmax(logits[:, :-1, :], dim=-1)  
                 shifted_labels = labels_tensor[:, 1:].clone()
-                mask = shifted_labels != -100  # 只在 choice 段
-                # 采样对应 token 的对数概率
+                mask = shifted_labels != -100  
+
                 token_log_probs = log_probs.gather(
                     dim=-1,
                     index=shifted_labels.masked_fill(~mask, 0).unsqueeze(-1)
                 ).squeeze(-1)
                 token_log_probs = token_log_probs.masked_fill(~mask, 0.0)
-                # 求和得到每个样本的 total logprob
-                total_logprob_per_sample = token_log_probs.sum(dim=1)  # [B]
+                total_logprob_per_sample = token_log_probs.sum(dim=1) 
 
-            # 5) 归一化：在该 prefix 的 choices 上做 softmax(total_logprob)
             if normalize == "avg":
-                # 可选：按长度做平均 logprob 再 softmax（长度归一，偏向更短的惩罚减少）
                 total_logprob_per_sample = total_logprob_per_sample / valid_counts
 
-            probs = torch.softmax(total_logprob_per_sample, dim=0)  # [B]
+            probs = torch.softmax(total_logprob_per_sample, dim=0)  
             all_group_probs.append(probs.detach().cpu().tolist())
 
         return all_group_probs
     
-    # ============ 下一步选择概率（HF） ============
     @torch.no_grad()
     def choice_probs_old(self, prefixes: Sequence[str], choices: Sequence[Sequence[str]]) -> List[List[float]]:
-        """
-        对每个 prefix，计算下一 token 选择在 choices 间的概率分布。
-        choices[i] 是多个备选字符串（通常是 ' True' 和 ' False'）。
-        """
+
         outs: List[List[float]] = []
         for prefix, chs in zip(prefixes, choices):
             ids = self.tokenizer(prefix, return_tensors="pt").to(self.lm.device)
-            logits = self.lm(**ids).logits[0, -1, :]         # 下一 token 分布
+            logits = self.lm(**ids).logits[0, -1, :]        
             probs  = torch.softmax(logits, -1)
 
             row=[]
             for c in chs:
                 toks = self.tokenizer(c, add_special_tokens=False).input_ids
-                # 用第一个 token 的概率代表该 choice（推荐 True/False 单 token 方案）
                 tok_id = toks[0]
                 row.append(float(probs[tok_id].item()))
             s = sum(row) or 1e-12
