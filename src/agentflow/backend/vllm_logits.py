@@ -7,9 +7,9 @@ from vllm import LLM, SamplingParams
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from ..utils.log_util import get_logger
-from ..utils.chat_template import is_chat_messages, safe_apply_chat_template
-from ..core.interfaces import CanGenerate, CanChoiceProbs,SupportChatTemplate
+from agentflow.utils.log_util import get_logger
+from agentflow.utils.chat_template import is_chat_messages, safe_apply_chat_template
+from agentflow.core.interfaces import CanGenerate, CanChoiceProbs,SupportChatTemplate
 
 class VllmChoiceLogitsBackend(CanGenerate, CanChoiceProbs,SupportChatTemplate):
 

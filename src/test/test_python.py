@@ -7,8 +7,8 @@ os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 ROOT_DIR = os.path.abspath(os.path.join(__file__, "..",".."))  
 sys.path.insert(0, ROOT_DIR)     
 
-from src.tools.code.python_execution import PythonExecutionTool
-from src.tools.base import ToolCallRequest
+from agentflow.tools.code.python_execution import PythonExecutionTool
+from agentflow.tools.base import ToolCallRequest
 
 def test_python_tool_print_basic():
     tool = PythonExecutionTool(timeout_length=5)

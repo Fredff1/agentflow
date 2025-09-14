@@ -7,9 +7,9 @@ from openai import OpenAI
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from ..core.interfaces import CanGenerate,SupportChatTemplate
-from ..utils.log_util import get_logger
-from ..utils.chat_template import is_chat_messages
+from agentflow.core.interfaces import CanGenerate,SupportChatTemplate
+from agentflow.utils.log_util import get_logger
+from agentflow.utils.chat_template import is_chat_messages
 
 class OpenaiBackend(CanGenerate):
     
@@ -64,7 +64,7 @@ class OpenaiBackend(CanGenerate):
             try:
                 resp = self.client.chat.completions.create(**args)
 
-                return resp.choices[0].message, {"raw":resp}
+                return resp.choices[0].message.content, {"raw":resp}
 
             except Exception as e:
                 msg = f"[API attempt {attempt}/{max_retries}] Error: {e}"

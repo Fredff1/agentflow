@@ -2,10 +2,10 @@ from __future__ import annotations
 from typing import Protocol, List, Tuple, Dict, Any, Optional, Union, Callable
 from dataclasses import dataclass
 
-from ...common.messages import Message, trans_messages_to_text
-from ...core.interfaces import CanGenerate
+from agentflow.common.messages import Message, trans_messages_to_text
+from agentflow.core.interfaces import CanGenerate
 from .interface import SummarizerInterface, SummaryItem
-from ...utils.chat_template import is_chat_messages
+from agentflow.utils.chat_template import is_chat_messages
 
 def default_prompt_template(content: str) -> str:
     return (

@@ -12,10 +12,10 @@ os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 ROOT_DIR = os.path.abspath(os.path.join(__file__, "..", ".."))
 sys.path.insert(0, ROOT_DIR)
 
-from src.tools.search.backend.base import SearchBackend
-from src.tools.search.backend.searxng import SearxngBackend
-from src.tools.search.base_search import AsyncSearchTool
-from src.tools.base import ToolCallRequest
+from agentflow.tools.search.backend.base import SearchBackend
+from agentflow.tools.search.backend.searxng import SearxngBackend
+from agentflow.tools.search.base_search import AsyncSearchTool
+from agentflow.tools.base import ToolCallRequest
 
 
 # ------------------------------
@@ -59,7 +59,8 @@ def test_search_real_searxng_basic_no_summary():
     result = tool.run_one(ToolCallRequest(
         index=0,
         name="search",
-        content="python asyncio tutorial"
+        content="python asyncio tutorial",
+        meta={"round_counter":{"search":4}}
     ))
     print(result)
 

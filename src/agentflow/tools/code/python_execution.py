@@ -23,7 +23,7 @@ import math
 from sympy import symbols, Eq, solve
 from scipy import optimize
 
-from ..base import BaseTool, ToolCallRequest, ToolCallResult
+from agentflow.tools.base import BaseTool, ToolCallRequest, ToolCallResult
 # 如果需要日志：from utils.log_util import get_logger
 
 
@@ -211,8 +211,8 @@ class PythonExecutionTool(BaseTool):
     name = "python"
     description = "Execute Python code safely with optional stdout capture."
 
-    def __init__(self, *, timeout_length: int = 5, config: Optional[Dict[str, Any]] = None):
-        super().__init__(config=config)
+    def __init__(self, *, timeout_length: int = 5, config: Optional[Dict[str, Any]] = None, max_rounds: int = 3):
+        super().__init__(config=config,max_rounds=max_rounds)
         self.executor = PythonExecutor(
             runtime=GenericRuntime(),
             get_answer_symbol=None,
@@ -222,35 +222,41 @@ class PythonExecutionTool(BaseTool):
         )
 
     def run_one(self, call: ToolCallRequest, **kwargs: Any) -> ToolCallResult:
+        if self._is_quota_exceeded(call):
+            return self._make_exceeded_result(call)
+
         code_text = str(call.content)
         result, report = self.executor.apply(code_text)
-        meta = {
-            "success": report.startswith("Execution Success"),
-            "report": report,
-        }
-        result = ToolCallResult(
+        meta = {"success": report.startswith("Execution Success"), "report": report}
+        return ToolCallResult(
             tool_name=self.name,
             request_content=call.content,
             output=f"Console: {result}\n Report: {report}",
             meta=meta,
             error=None,
-            index =call.index,
+            index=call.index,
             call=call,
         )
-        return result
 
     def run_batch(self, calls: List[ToolCallRequest], **kwargs: Any) -> List[ToolCallResult]:
-        results = self.executor.batch_apply([str(call.content) for call in calls])
-        metas = [{"success": rep.startswith("Execution Success"), "report": rep} for (_, rep) in results]
-        final_results: List[ToolCallResult] = []
-        for (result, report), call, meta in zip(results,calls,metas):
-            final_results.append(ToolCallResult(
-                tool_name=self.name,
-                request_content=call.content,
-                output=f"Console: {result}\n Report: {report}",
-                meta=meta,
-                error=None,
-                index=call.index,
-                call=call,
-            ))
-        return final_results
+        def _runner(allowed_calls: List[ToolCallRequest]) -> List[ToolCallResult]:
+            if not allowed_calls:
+                return []
+            results = self.executor.batch_apply([str(c.content) for c in allowed_calls])
+            metas = [{"success": rep.startswith("Execution Success"), "report": rep} for (_, rep) in results]
+            packed: List[ToolCallResult] = []
+            for (out, rep), c, m in zip(results, allowed_calls, metas):
+                packed.append(
+                    ToolCallResult(
+                        tool_name=self.name,
+                        request_content=c.content,
+                        output=f"Console: {out}\n Report: {rep}",
+                        meta=m,
+                        error=None,
+                        index=c.index,
+                        call=c,
+                    )
+                )
+            return packed
+
+        return self._apply_round_quota(calls, _runner)

@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Protocol, List, Tuple, Dict, Any, Optional, Union
 
 
-from ...common.messages import Message
+from agentflow.common.messages import Message
 
 
 SummaryItem = Union[str, List[Message]]

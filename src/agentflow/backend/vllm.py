@@ -4,9 +4,9 @@ from logging import Logger
 
 from vllm import LLM, SamplingParams
 
-from ..core.interfaces import CanGenerate,SupportChatTemplate
-from ..utils.log_util import get_logger
-from ..utils.chat_template import is_chat_messages, safe_apply_chat_template
+from agentflow.core.interfaces import CanGenerate,SupportChatTemplate
+from agentflow.utils.log_util import get_logger
+from agentflow.utils.chat_template import is_chat_messages, safe_apply_chat_template
 
 class VllmBackend(CanGenerate, SupportChatTemplate):
     

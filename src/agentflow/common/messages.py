@@ -15,11 +15,27 @@ class Message:
         return {"role":self.role,"content":self.content}
     
     @classmethod
-    def to_chat_messages(cls, messages: List['Message']):
-        msg_list = []
+    def from_dicts(cls, messages: List[Dict[str,str]]) ->List[Message]:
+        msgs = []
         for msg in messages:
-            msg_list.append(msg.to_dict())
-        return msg_list
+            msgs.append(Message(
+                role=msg["role"],
+                content=msg["content"]
+            ))
+        return msgs
+    
+    
+def trans_messages_to_standard(
+    messages: List['Message'], 
+    tool_role_to_map: Literal["tool","assistant"]="tool"
+) -> List[Dict[str,str]]:
+    msg_list = []
+    for msg in messages:
+        msg_dict = msg.to_dict()
+        if msg.role == "tool":
+            msg_dict["role"]=tool_role_to_map
+        msg_list.append(msg_dict)
+    return msg_list
             
 
 def trans_messages_to_text(messages: List[Message], max_chars: Optional[int] = None) -> str:

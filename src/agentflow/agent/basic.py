@@ -1,0 +1,120 @@
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import List, Dict, Tuple, Any, Optional, Callable
+
+from .context import AgentContext
+from agentflow.core.interfaces import CanGenerate
+from agentflow.common.messages import Message, trans_messages_to_standard
+from agentflow.tools.base import ToolCallResult
+from agentflow.tools.registry import ToolRegistry
+from agentflow.tools.caller import ToolCaller       
+from agentflow.tools.base import ToolParser      
+from agentflow.utils.chat_template import is_chat_messages   
+
+class ToolDrivenAgent(CanGenerate):
+    def __init__(
+        self,
+        backend: CanGenerate,         
+        tool_caller: ToolCaller,  
+        finish_fn: Callable[[AgentContext],bool],
+        *,     
+        max_rounds: int = 6,    
+    ):
+        self.backend = backend
+        self.tool_caller = tool_caller
+        self.tool_parser = tool_caller.parser
+        self.max_rounds = max_rounds
+        self.finish_fn = finish_fn
+
+    def generate(
+        self, 
+        prompts: List, 
+        extra: List[Dict] = None, 
+        **kwargs
+    ) -> Tuple[List[str],List[Dict]]:
+        prompt_len = len(prompts)
+        
+        if prompt_len < 1:
+            raise ValueError("Prompts cannot be empty")
+        if isinstance(prompts[0],str):
+            tmp = [[{"role":"user","content":prompt}] for prompt in prompts]
+            prompts = tmp
+        elif is_chat_messages(prompts[0]):
+            pass
+        else:
+            raise ValueError("Prompts must be a list of str or chat message lists")
+        extra = extra or [None] * prompt_len
+        msgs_per_samp: List[List[Message]] = [Message.from_dicts(prompt) for prompt in prompts]
+        contexts: List[AgentContext] = [AgentContext.from_messages(msgs,ex) for msgs, ex in zip(msgs_per_samp,extra)]
+        
+        final_texts = ["" for _ in range(prompt_len)]
+        finished = [False] * prompt_len
+        metas: List[Dict] = [{"steps": [], "context":contexts[i]} for i in range(prompt_len)]
+        for round in range(self.max_rounds):
+            active = [i for i in range(prompt_len) if not finished[i]]
+            
+            if not active:
+                break
+            
+            batch_inputs = [trans_messages_to_standard(contexts[i].all_messages()) for i in active]
+            batch_extra = [contexts[i].meta for i in active]
+            texts, backend_metas = self.backend.generate(batch_inputs, extra=batch_extra, **kwargs)
+            
+            for j, i in enumerate(active):
+                contexts[i].step_index = round
+                metas[i]["steps"].append({"assistant_text": texts[j], "backend_meta": backend_metas[j]})
+                contexts[i].append_assistant(texts[j])
+                
+            calls_per_text = self.tool_parser.parse_batch(texts, backend_metas)
+            should_finish_flags: List[bool] = []
+            needs_tool_flags: List[bool] = []
+            for j, i in enumerate(active):
+                has_calls = len(calls_per_text[j]) > 0
+                needs_tool_flags.append(has_calls)
+                # 若 finish_fn 判 True，直接结束（优先级更高）；否则若无工具，也结束
+                should_finish_flags.append(self.finish_fn(contexts[i]))
+                if (not has_calls) and (not self.finish_fn(contexts[i])):
+                    contexts[i].pop() # 没有工具，也没结束标志，则回溯对话
+            
+            for j, i in enumerate(active):
+                if should_finish_flags[j]:
+                    finished[i] = True
+                    final_texts[i] = texts[j]
+
+            # 过滤出需要调工具的样本子集
+            to_call_local_indices: List[int] = [j for j in range(len(active)) if (not should_finish_flags[j]) and needs_tool_flags[j]]
+            if not to_call_local_indices:
+                # 本轮剩余样本都已结束或不需要工具 → 检查是否全结束
+                if all(finished):
+                    break
+                continue
+
+            # 将 round_counter 映射到 meta，供工具限额使用
+            for j in to_call_local_indices:
+                i = active[j]
+                contexts[i].meta.setdefault("round_counter", {})
+                # 用 context 内的统计覆盖/补充 meta
+                contexts[i].meta["round_counter"].update(contexts[i].round_counters)
+
+            # 调用工具（只对需要的子集）
+            sub_texts = [texts[j] for j in to_call_local_indices]
+            sub_metas = [backend_metas[j] for j in to_call_local_indices]  # 解析器 meta 传入
+            batch_results_sub: List[List[ToolCallResult]] = self.tool_caller.call_batch(sub_texts, sub_metas)
+
+            # 回填工具 observation、更新计数
+            for k, j in enumerate(to_call_local_indices):
+                i = active[j]
+                results = batch_results_sub[k]
+                metas[i]["steps"][-1]["tool_results"] = results
+                for r in results:
+                    contexts[i].update_round_counter(r)
+                    obs_text = self.tool_parser.make_result_str(r)
+                    contexts[i].append_tool_observation(obs_text, metadata=r.meta)
+                    
+        for i in range(prompt_len):
+            if not finished[i]:
+                last = metas[i]["steps"][-1] if metas[i]["steps"] else {}
+                final_texts[i] = last.get("assistant_text", "")
+
+        return final_texts, metas
+            

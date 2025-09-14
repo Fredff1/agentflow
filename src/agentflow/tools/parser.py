@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 
-from .base import ToolParser, ToolCallRequest
-from ..utils.tag_util import find_tags
+from .base import ToolParser, ToolCallRequest, ToolCallResult
+from src.utils.tag_util import find_tags
 
 class TagToolParser(ToolParser):
     
@@ -25,3 +25,5 @@ class TagToolParser(ToolParser):
             calls.append(call)
         return calls
 
+    def make_result_str(self, result: ToolCallResult) -> str:
+        return f"<result>{result.output}</result>"

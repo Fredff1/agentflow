@@ -5,10 +5,10 @@ os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 ROOT_DIR = os.path.abspath(os.path.join(__file__, "..",".."))  
 sys.path.insert(0, ROOT_DIR)     
 
-from src.backend.vllm_logits import VllmChoiceLogitsBackend
+from agentflow.backend.vllm_logits import VllmChoiceLogitsBackend
 
-from src.config import load_config
-from src.utils.tag_util import find_tags
+from agentflow.config import load_config
+from agentflow.utils.tag_util import find_tags
 
 
 def test():

@@ -3,8 +3,9 @@ from typing import Sequence, List, Dict, Any, Optional
 from logging import Logger
 import torch
 from transformers import AutoTokenizer, AutoModel
-from ..utils.log_util import get_logger
-from ..core.interfaces import SupportChatTemplate, CanRMScores
+
+from agentflow.utils.log_util import get_logger
+from agentflow.core.interfaces import SupportChatTemplate, CanRMScores
 
 
 class HFRMBackend(SupportChatTemplate,CanRMScores):
@@ -94,7 +95,7 @@ class HFRMBackend(SupportChatTemplate,CanRMScores):
             return None
 
     @torch.no_grad()
-    def rm_scores(
+    def score(
         self,
         sequences: Sequence[str],
         extra: List[Dict[str, Any]] | None = None,

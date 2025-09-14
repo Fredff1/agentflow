@@ -6,9 +6,9 @@ ROOT_DIR = os.path.abspath(os.path.join(__file__, "..",".."))
 sys.path.insert(0, ROOT_DIR)     
 
 
-from src.backend.vllm import VllmBackend
+from agentflow.backend.vllm import VllmBackend
 
-from src.config import load_config
+from agentflow.config import load_config
 
 
 def test():
