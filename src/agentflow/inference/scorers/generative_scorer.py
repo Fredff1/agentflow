@@ -46,7 +46,7 @@ Your judgement:
                 prefix_text = "Mock"
                 invalid_idxs.append(idx)
             prefixes.append(prefix_text)
-        probs = self.generator.choice_probs(prefixes,["true","false"])
+        probs = self.generator.choice_probs(prefixes,[["true","false"] for _ in len(prefixes)])
         results: List[float] = []
         for idx, prob in enumerate(probs):
             if idx in invalid_idxs:
