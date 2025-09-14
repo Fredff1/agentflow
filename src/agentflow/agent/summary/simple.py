@@ -35,7 +35,7 @@ class GeneratorSummarizer(SummarizerInterface):
             if isinstance(it, str):
                 texts.append(it)
             else:
-                texts.append(trans_messages_to_text(it, max_chars=None))
+                texts.append(trans_messages_to_text(it))
 
         prompts = [self.prompt_template_fn(t) for t in texts]
         messages = [[{"role":"user","content":prompt}] for prompt in prompts]

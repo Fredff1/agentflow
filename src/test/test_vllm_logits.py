@@ -12,7 +12,7 @@ from agentflow.utils.tag_util import find_tags
 
 
 def test():
-    config = load_config("/root/workspace/agent-rm/Agent-Verifier/config/default.yml")
+    config = load_config("/root/workspace/agent-rm/Agent-Verifier/config/score_vanilla.yaml")
     vllm_engine = VllmChoiceLogitsBackend(config)
     PROMPT = """
     Answer the given question and put the result in <answer>...</answer> tag

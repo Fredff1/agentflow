@@ -4,7 +4,7 @@ from typing import List, Dict, Tuple, Any, Optional, Callable
 
 from .context import AgentContext
 from agentflow.core.interfaces import CanGenerate
-from agentflow.common.messages import Message, trans_messages_to_standard
+from agentflow.common.messages import Message, trans_messages_to_standard, trans_messages_to_text
 from agentflow.tools.base import ToolCallResult
 from agentflow.tools.registry import ToolRegistry
 from agentflow.tools.caller import ToolCaller       
@@ -79,7 +79,6 @@ class ToolDrivenAgent(CanGenerate):
             for j, i in enumerate(active):
                 if should_finish_flags[j]:
                     finished[i] = True
-                    final_texts[i] = texts[j]
 
             # 过滤出需要调工具的样本子集
             to_call_local_indices: List[int] = [j for j in range(len(active)) if (not should_finish_flags[j]) and needs_tool_flags[j]]
@@ -112,9 +111,8 @@ class ToolDrivenAgent(CanGenerate):
                     contexts[i].append_tool_observation(obs_text, metadata=r.meta)
                     
         for i in range(prompt_len):
-            if not finished[i]:
-                last = metas[i]["steps"][-1] if metas[i]["steps"] else {}
-                final_texts[i] = last.get("assistant_text", "")
+            assistant_messages = contexts[i].all_round_messages()
+            final_texts[i] = trans_messages_to_text(assistant_messages)
 
         return final_texts, metas
             

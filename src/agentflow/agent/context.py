@@ -111,6 +111,12 @@ class AgentContext:
     def round_messages(self, round_index: int) -> List[Message]:
         self._ensure_round_exists(round_index)
         return list(self.rounds[round_index].messages)
+    
+    def all_round_messages(self) -> List[Message]:
+        msg_list = []
+        for round in self.rounds:
+            msg_list.extend(round.messages)
+        return msg_list
 
     def all_messages(self) -> List[Message]:
         """返回送入后端的完整消息序列：初始 + 各轮累积。"""

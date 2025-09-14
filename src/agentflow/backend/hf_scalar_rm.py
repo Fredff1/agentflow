@@ -1,16 +1,18 @@
 # src/backends/hf_rm_backend.py
-from typing import Sequence, List, Dict, Any, Optional
+from typing import Sequence, List, Dict, Any, Optional, Union,Tuple
 from logging import Logger
 import torch
 from transformers import AutoTokenizer, AutoModel
 
 from agentflow.utils.log_util import get_logger
 from agentflow.core.interfaces import SupportChatTemplate, CanRMScores
+from agentflow.utils.chat_template import is_chat_messages, safe_apply_chat_template, ChatTemplateDefaultsMixin
 
 
-class HFRMBackend(SupportChatTemplate,CanRMScores):
+class HFRMBackend(SupportChatTemplate,CanRMScores,ChatTemplateDefaultsMixin):
 
     def __init__(self, config: Dict[str, Any], logger: Optional[Logger] = None):
+        super().__init__()
         self.logger: Logger = logger if logger else get_logger(config, __name__)
 
         backend_config: Dict[str, Any] = config.get("backend", {})
@@ -54,20 +56,20 @@ class HFRMBackend(SupportChatTemplate,CanRMScores):
             f"padding_side={self.padding_side}, truncation_side={self.truncation_side}"
         )
 
-    def apply_chat_template(
-        self,
-        messages: List[Dict[str, str]],
-        tokenize: bool = False,
-        add_generation_prompt: bool = True,
-        **additional_params
-    ) -> str:
-        tokens = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=tokenize,
-            add_generation_prompt=add_generation_prompt,
-            **additional_params,
+    def apply_chat_template(self, messages: List[Dict[str,str]], 
+                            tokenize=False, 
+                            add_generation_prompt=True, 
+                            **additional_params) -> Union[str,Any]:
+        merged = {**self._chat_template_defaults, **additional_params}
+        result, _ = safe_apply_chat_template(
+            self.tokenizer,
+            messages=messages,
+            tokenize = tokenize,
+            add_generation_prompt = add_generation_prompt,
+            **merged
         )
-        return tokens
+
+        return result
 
     def _try_remote_scores(self, batch_texts: List[str]) -> Optional[torch.Tensor]:
         model = self.model
@@ -100,7 +102,7 @@ class HFRMBackend(SupportChatTemplate,CanRMScores):
         sequences: Sequence[str],
         extra: List[Dict[str, Any]] | None = None,
         **kwargs: Any
-    ) -> List[float]:
+    ) -> Tuple[List[float],List[Dict]]:
 
         if not sequences:
             return []
@@ -150,4 +152,4 @@ class HFRMBackend(SupportChatTemplate,CanRMScores):
 
             normalized_scores.extend(scores.detach().float().cpu().tolist())
 
-        return normalized_scores
+        return normalized_scores, [{}] * len(normalized_scores)

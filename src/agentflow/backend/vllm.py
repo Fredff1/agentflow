@@ -6,12 +6,13 @@ from vllm import LLM, SamplingParams
 
 from agentflow.core.interfaces import CanGenerate,SupportChatTemplate
 from agentflow.utils.log_util import get_logger
-from agentflow.utils.chat_template import is_chat_messages, safe_apply_chat_template
+from agentflow.utils.chat_template import is_chat_messages, safe_apply_chat_template, ChatTemplateDefaultsMixin
 
-class VllmBackend(CanGenerate, SupportChatTemplate):
+class VllmBackend(CanGenerate, SupportChatTemplate, ChatTemplateDefaultsMixin):
     
     def __init__(self, config: Dict[str,Any], logger: Logger = None, **kwargs):
         super().__init__()
+        ChatTemplateDefaultsMixin.__init__(self)
         self.config = config
         if logger:
             self.logger = logger
@@ -41,12 +42,13 @@ class VllmBackend(CanGenerate, SupportChatTemplate):
                             tokenize=False, 
                             add_generation_prompt=True, 
                             **additional_params) -> Union[str,Any]:
+        merged = {**self._chat_template_defaults, **additional_params}
         result, _ = safe_apply_chat_template(
             self.tokenizer,
             messages=messages,
             tokenize = tokenize,
             add_generation_prompt = add_generation_prompt,
-            **additional_params
+            **merged
         )
 
         return result

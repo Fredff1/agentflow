@@ -38,13 +38,9 @@ def trans_messages_to_standard(
     return msg_list
             
 
-def trans_messages_to_text(messages: List[Message], max_chars: Optional[int] = None) -> str:
+def trans_messages_to_text(messages: List[Message]) -> str:
     lines = []
     for m in messages:
-        name = f" ({m.name})" if m.name else ""
-        lines.append(f"[{m.role}{name}] {m.content}")
+        lines.append(f"{m.content}")
     text = "\n".join(lines)
-    if max_chars and len(text) > max_chars:
-        half = max_chars // 2
-        text = text[:half] + "\n...\n" + text[-half:]
     return text
