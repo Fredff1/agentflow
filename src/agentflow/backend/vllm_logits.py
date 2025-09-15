@@ -12,7 +12,9 @@ from agentflow.utils.chat_template import is_chat_messages, safe_apply_chat_temp
 from agentflow.core.interfaces import CanGenerate, CanChoiceProbs,SupportChatTemplate
 
 class VllmChoiceLogitsBackend(CanGenerate, CanChoiceProbs,SupportChatTemplate,ChatTemplateDefaultsMixin):
-
+    """A Vllm backend for both text generation and prob calculation
+    The class will both load vllm LLM object and transformers model, please make sure there are enough gpu memory.
+    """
     def __init__(self, config: Dict[str, Any], logger: Logger | None = None, **kwargs):
         super().__init__()
         ChatTemplateDefaultsMixin.__init__(self)
@@ -70,7 +72,17 @@ class VllmChoiceLogitsBackend(CanGenerate, CanChoiceProbs,SupportChatTemplate,Ch
         self.vllm_config = backend_config.get("vllm", {})
         self.hf_config = backend_config.get("hf", {"device":"cuda","torch_dtype":"auto"})
 
-    def generate(self, prompts: List[str], extra: List[Dict] | None = None, **kwargs) -> Tuple[List[str], List[Dict]]:
+    def generate(self, prompts: List[Any], extra: List[Dict] | None = None, **kwargs) -> Tuple[List[str], List[Dict]]:
+        """Generate sequences with gievn prompt list
+
+        Args:
+            prompts (List): Prompt list of chat messages or raw str. If chat messages are provided, it will automatically apply chat template
+            extra (List[Dict], optional): Extra info dicts. Defaults to None.
+
+        Returns:
+            Tuple[List[str],List[Dict]]: Generated sequences and any metainfo
+                - The metainfo format: {"raw_output":<raw_vllm_output_object>}
+        """
         sp = self.sampling_params
         if kwargs:
             sp = SamplingParams(**{**sp.__dict__, **kwargs})

@@ -330,10 +330,6 @@ def grade_answer_sympy(given_answer: str, ground_truth: str) -> bool:
     return True
 
 def grade_answer_verl(solution_str: str, ground_truth: str) -> Dict[str, Any]:
-    """
-    综合判分：先从 rollout/gt 中抽取 boxed，随后用 mathd 或 sympy 比对。
-    返回包含解析与判分细节的字典。
-    """
     if not ground_truth:
         return {"parsed_gt": None, "parsed_pred": None, "correct": False,
                 "mathd_equal": False, "sympy_equal": False}
@@ -345,7 +341,6 @@ def grade_answer_verl(solution_str: str, ground_truth: str) -> Dict[str, Any]:
         return {"parsed_gt": gt_parsed, "parsed_pred": None, "correct": False,
                 "mathd_equal": False, "sympy_equal": False}
 
-    # 两路判定
     mathd_ok = grade_answer_mathd(pred_parsed, gt_parsed)
     sympy_ok = False if mathd_ok else grade_answer_sympy(pred_parsed, gt_parsed)
 
@@ -358,7 +353,22 @@ def grade_answer_verl(solution_str: str, ground_truth: str) -> Dict[str, Any]:
     }
 
 def evaluate_samples(samples: List[Any], ground_truth: str) -> List[Dict[str, Any]]:
-    """对一条记录的多个 sample 逐个评估，返回 evaluations 列表。"""
+    """Evaluate the correctness of list of samples with given ground truth
+
+    Args:
+        samples (List[Any]): samples
+        ground_truth (str): ground truth string
+
+    Returns:
+        List[Dict[str, Any]]: evaluation result with structure like
+        {
+            "parsed_gt":"",
+            "parsed_pred:"",
+            "correct:"",
+            "mathd_equal":"",
+            "sympy_equal":"",
+        }
+    """
     outs: List[Dict[str, Any]] = []
     for s in samples:
         text = s if isinstance(s, str) else str(s)

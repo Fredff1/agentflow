@@ -12,6 +12,8 @@ from agentflow.utils.log_util import get_logger
 from agentflow.utils.chat_template import is_chat_messages
 
 class OpenaiBackend(CanGenerate):
+    """Backend based on Openai API
+    """
     
     def __init__(self, config: Dict[str,Any], logger: Logger = None, **kwargs):
         super().__init__()
@@ -29,6 +31,16 @@ class OpenaiBackend(CanGenerate):
         self.max_concurrency = self.openai_config.get("max_concurrency",4)
     
     def generate(self, prompts: List, extra: List[Dict] = None, **kwargs) -> Tuple[List[str],List[Dict]]:
+        """Generate sequences with gievn prompt list
+
+        Args:
+            prompts (List): Prompt list of chat messages or raw str. If raw str are given, they would be wrapped as user prompt for api requests.
+            extra (List[Dict], optional): Extra info dicts. Defaults to None.
+
+        Returns:
+            Tuple[List[str],List[Dict]]: Generated sequences and any metainfo
+                - The metainfo format: {"raw":<full_api_response_object>}
+        """
         results = [""] * len(prompts)
         metas = [{}] * len(prompts)
         input_messages = prompts

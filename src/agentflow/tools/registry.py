@@ -3,11 +3,14 @@ from typing import List, Dict, Optional
 from.base import BaseTool
 
 class ToolRegistry:
+    
     def __init__(self) -> None:
         self._tools: Dict[str, BaseTool] = {}
 
 
     def register(self,tool: BaseTool) -> None:
+        """Register a tool
+        """
         self._tools[tool.name] = tool
 
 

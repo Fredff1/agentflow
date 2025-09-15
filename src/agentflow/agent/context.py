@@ -6,14 +6,13 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Literal
 
 from agentflow.common.messages import Message
-from agentflow.tools.base import ToolCallResult  # 若当前未用，可移除
+from agentflow.tools.base import ToolCallResult  
 
 RoundRole = Literal["user", "system", "assistant", "tool"]
 
 
 @dataclass
 class RoundBuffer:
-    """单轮消息缓冲。"""
     messages: List[Message] = field(default_factory=list)
     meta: Dict[str, Any] = field(default_factory=dict)
 
@@ -38,16 +37,14 @@ class AgentContext:
     request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     step_index: int = 0
 
-    prompt_messages: List[Message] = field(default_factory=list)  # 初始 system/user...
+    prompt_messages: List[Message] = field(default_factory=list)  
     rounds: List[RoundBuffer] = field(default_factory=list)
     global_round: int = 0
 
-    # 统计/记录
     round_counters: Dict[str, int] = field(default_factory=dict)
     tool_results: List[ToolCallResult] = field(default_factory=list)
     meta: Dict[str, Any] = field(default_factory=dict)
 
-    # -------- 轮次维护 --------
     def set_round(self, round_index: int) -> None:
         self.global_round = int(round_index)
         self._ensure_round_exists(self.global_round)
@@ -61,7 +58,6 @@ class AgentContext:
         while len(self.rounds) <= idx:
             self.rounds.append(RoundBuffer())
 
-    # -------- 读写与追加（message-first）--------
     def append(
         self,
         content: str,
@@ -100,7 +96,6 @@ class AgentContext:
                 return self.rounds[r].messages.pop()
         return None
 
-    # -------- 访问视图 --------
     def current_round_buffer(self) -> RoundBuffer:
         self._ensure_round_exists(self.global_round)
         return self.rounds[self.global_round]
@@ -132,7 +127,6 @@ class AgentContext:
                 return msgs[-1]
         return None
 
-    # -------- 统计/工具结果 --------
     def update_round_counter(self, tool_result: ToolCallResult) -> None:
         tool_name = getattr(tool_result, "tool_name", None) or tool_result.get("tool_name", "tool")
         new_counter = self.round_counters.get(tool_name, 0) + 1
@@ -140,7 +134,6 @@ class AgentContext:
         self.meta["round_counter"][tool_name] = new_counter
         self.tool_results.append(tool_result)
 
-    # -------- 构造器 --------
     @classmethod
     def from_messages(cls, messages: List[Message], meta: Optional[Dict[str, Any]] = None) -> AgentContext:
         ctx = cls(prompt_messages=list(messages), meta=meta or {})

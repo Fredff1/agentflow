@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional, Tuple, Callable
 
 @dataclass
 class ToolCallRequest:
+    """Wrapper class for a tool call request
+    """
     index: int
     name: str
     content: str
@@ -13,6 +15,8 @@ class ToolCallRequest:
     
 @dataclass
 class ToolCallResult:
+    """Wrapper class for a tool call result
+    """
     tool_name: str
     request_content: str
     output: Any
@@ -24,8 +28,15 @@ class ToolCallResult:
     
 
 class ToolParser:
-    def parse(self, text: str, meta: Dict = None) -> list[ToolCallRequest]: ...
+    """A component to parse tool call requestsfom plain texts
+    """
+    def parse(self, text: str, meta: Dict = None) -> list[ToolCallRequest]: 
+        """Parse requests from one sample
+        """
+        ...
     def parse_batch(self, texts: list[str], metas: List[Dict]=None) -> list[list[ToolCallRequest]]:
+        """Parse requests from batch samples
+        """
         if not metas:
             metas = [None]*len(texts)
         return [self.parse(t, meta) for t, meta in zip(texts,metas)]
@@ -33,22 +44,23 @@ class ToolParser:
     def make_result_str(self, result: ToolCallResult) -> str:...
 
 class BaseTool(ABC):
-    """Minimal tool base: implement run_one; run_batch loops by default with quota check."""
+    """Base class for a tool"""
 
     name: str = "tool"
 
     def __init__(self, config: Optional[Dict[str, Any]] = None, max_rounds: int = 3) -> None:
         self.config: Dict[str, Any] = dict(config or {})
-        self.max_rounds: int = int(max_rounds)  # 每个样本/轮的最大调用次数阈值（基于 meta.round_counter）
+        self.max_rounds: int = int(max_rounds)  
 
-    # ---- 子类必须实现 ----
     @abstractmethod
     def run_one(self, call: ToolCallRequest, **kwargs: Any) -> ToolCallResult:
-        """Run the tool once. Return ToolCallResult."""
+        """Run the tool once.Automatically check tool quota by reading from request.meta["round_counter"]"""
         raise NotImplementedError
 
-    # ---- 对外批处理（默认：for 循环 + 配额检查 + 兜底错误）----
     def run_batch(self, calls: List[ToolCallRequest], **kwargs: Any) -> List[ToolCallResult]:
+        """Run tool with batch inputs.Automatically check tool quota by reading from request.meta["round_counter"]
+
+        """
         def _runner(allowed_calls: List[ToolCallRequest]) -> List[ToolCallResult]:
             out: List[ToolCallResult] = []
             for c in allowed_calls:
@@ -60,7 +72,6 @@ class BaseTool(ABC):
             return out
         return self._apply_round_quota(calls, _runner)
 
-    # ================== 通用工具：配额裁剪与结果构造 ==================
 
     def _apply_round_quota(
         self,
@@ -69,7 +80,6 @@ class BaseTool(ABC):
     ) -> List[ToolCallResult]:
         if self.max_rounds and self.max_rounds > 0:
             pass
-        # 分流
         allowed: List[ToolCallRequest] = []
         allowed_positions: List[int] = []
         results: List[Optional[ToolCallResult]] = [None] * len(calls)
@@ -81,13 +91,11 @@ class BaseTool(ABC):
                 allowed.append(call)
                 allowed_positions.append(i)
 
-        # 实际执行
         if allowed:
             produced = runner(allowed)
             for pos, r in zip(allowed_positions, produced):
                 results[pos] = r
 
-        # 填充兜底（理论上不应出现 None）
         final: List[ToolCallResult] = []
         for i, r in enumerate(results):
             if r is None:
@@ -97,7 +105,6 @@ class BaseTool(ABC):
         return final
 
     def _is_quota_exceeded(self, call: ToolCallRequest) -> bool:
-        """从 call.meta.round_counter 中读取该工具的使用次数，与 self.max_rounds 比较。"""
         if self.max_rounds <= 0:
             return False
         meta = getattr(call, "meta", None) or {}

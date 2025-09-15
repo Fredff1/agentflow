@@ -4,7 +4,10 @@ from .base import ToolParser, ToolCallRequest, ToolCallResult
 from agentflow.utils.tag_util import find_tags
 
 class TagToolParser(ToolParser):
-    
+    """Tool parser that parse tool requests like 
+    \<tool_name>content\</tool_name>
+
+    """
     def __init__(self, tool_tags: List[str] = ["search","python"]):
         super().__init__()
         self.tool_tags = tool_tags

@@ -7,12 +7,26 @@ from .registry import ToolRegistry
 from .base import ToolCallRequest, ToolParser, ToolCallResult
 
 class ToolCaller:
-    
+    """Wrapper class for conveniently call multiple tools with given text
+    """
     def __init__(self, registry: ToolRegistry, parser: ToolParser):
         self.registry = registry
         self.parser = parser
         
     def call_batch(self, texts: List[str], metas: List[Dict]=None, **kwargs) -> List[List[ToolCallResult]]:
+        """Call tools with batch input texts
+
+        Args:
+            texts (List[str]): Texts that contains tool-call symbols
+            metas (List[Dict], optional): Meta info that contains. Defaults to None.
+
+        If any meta contains a dict with structure {"tool_name":int}, tool quota will be applied to the corresponding tool.
+        Raises:
+            RuntimeError: When parsed tools do not exist in registry
+
+        Returns:
+            List[List[ToolCallResult]]: tool call results
+        """
         if not metas:
             metas = [None]*len(texts)
         calls_per_text = self.parser.parse_batch(texts,metas)
@@ -45,4 +59,7 @@ class ToolCaller:
         return final_results
     
     def call_single(self, text: str, meta: Dict=None) -> List[ToolCallResult]:
+        """Call tool for a single input
+        If meta contains a dict with structure {"tool_name":int}, tool quota will be applied to the corresponding tool.
+        """
         return self.call_batch([text],[meta])[0]

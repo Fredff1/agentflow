@@ -9,6 +9,8 @@ from agentflow.utils.log_util import get_logger
 from agentflow.utils.chat_template import is_chat_messages, safe_apply_chat_template, ChatTemplateDefaultsMixin
 
 class VllmBackend(CanGenerate, SupportChatTemplate, ChatTemplateDefaultsMixin):
+    """A VLLM backend for text generation
+    """
     
     def __init__(self, config: Dict[str,Any], logger: Logger = None, **kwargs):
         super().__init__()
@@ -54,7 +56,16 @@ class VllmBackend(CanGenerate, SupportChatTemplate, ChatTemplateDefaultsMixin):
         return result
     
     def generate(self, prompts: List, extra: List[Dict] = None, **kwargs) -> Tuple[List[str],List[Dict]]:
-        
+        """Generate sequences with gievn prompt list
+
+        Args:
+            prompts (List): Prompt list of chat messages or raw str. If chat messages are provided, it will automatically apply chat template
+            extra (List[Dict], optional): Extra info dicts. Defaults to None.
+
+        Returns:
+            Tuple[List[str],List[Dict]]: Generated sequences and any metainfo
+                - The metainfo format: {"raw_output":<raw_vllm_output_object>}
+        """
         if is_chat_messages(prompts):
             prompts = self.apply_chat_template(prompts)
         

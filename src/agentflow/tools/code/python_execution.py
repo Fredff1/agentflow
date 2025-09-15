@@ -24,7 +24,6 @@ from sympy import symbols, Eq, solve
 from scipy import optimize
 
 from agentflow.tools.base import BaseTool, ToolCallRequest, ToolCallResult
-# 如果需要日志：from utils.log_util import get_logger
 
 
 def _safe_traceback(exc: BaseException, limit: int = 2) -> str:
@@ -34,7 +33,6 @@ def _safe_traceback(exc: BaseException, limit: int = 2) -> str:
     return "".join(lines)
 
 
-# -------- Sandboxed runtimes --------
 class GenericRuntime:
     GLOBAL_DICT: Dict[str, Any] = {}
     LOCAL_DICT: Optional[Dict[str, Any]] = None
@@ -206,8 +204,9 @@ class PythonExecutor:
         return batch_results
 
 
-# -------- Tool wrapper --------
 class PythonExecutionTool(BaseTool):
+    """Execute Python code safely with optional stdout capture.
+    """
     name = "python"
     description = "Execute Python code safely with optional stdout capture."
 

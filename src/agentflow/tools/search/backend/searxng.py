@@ -6,8 +6,7 @@ from aiohttp import ClientTimeout
 from bs4 import BeautifulSoup
 
 from .base import SearchBackend
-# 可选日志：from utils.log_util import get_logger
-# -------- Searxng Backend --------
+
 class SearxngBackend(SearchBackend):
     def __init__(self, base_url: str, proxy: Optional[str] = None):
         self.base_url = base_url.rstrip("/")

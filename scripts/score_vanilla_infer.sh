@@ -3,7 +3,7 @@ export CUDA_VISIBLE_DEVICES=1
 python /root/workspace/agent-rm/Agent-Verifier/src/score_vanilla_infer.py \
   --config /root/workspace/agent-rm/Agent-Verifier/config/score_vanilla.yaml \
   --input  /root/workspace/agent-rm/datasets/aime2025/0915/Qwen-2.5-7B-Instruct_bon16.jsonl \
-  --output /root/workspace/agent-rm/datasets/aime2025/0915/Qwen-2.5-7B-Instruct_bon16_vanilla_score1.jsonl \
+  --output /root/workspace/agent-rm/datasets/aime2025/0915/Qwen-2.5-7B-Instruct_bon16_vanilla_score2.jsonl \
   --record-batch-size 1 \
   --join-template "Question: {prompt}\Answer: {response}" \
   # --judge-system-file /root/workspace/agent-rm/prompts/judge_system.txt \

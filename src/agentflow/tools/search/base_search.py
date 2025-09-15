@@ -14,7 +14,6 @@ def _run_coroutine_blocking(coro):
     except RuntimeError:
         return asyncio.run(coro)
 
-    # already inside an event loop → run in a dedicated thread loop
     import threading
 
     result_holder: Dict[str, Any] = {}
@@ -34,6 +33,8 @@ def _run_coroutine_blocking(coro):
     return result_holder.get("v")
 
 class AsyncSearchTool(BaseTool):
+    """Async search tool which can switch from search backends.
+    """
     name = "search"
     description = "Async search tool with pluggable backends (blocking API)."
 
@@ -68,7 +69,6 @@ class AsyncSearchTool(BaseTool):
         self.summarize_engine = summarize_engine
 
     def run_one(self, call: ToolCallRequest, **kwargs: Any) -> ToolCallResult:
-        # 早返回：达到配额直接给“超额占位”
         if self._is_quota_exceeded(call):
             return self._make_exceeded_result(call)
 
@@ -95,7 +95,6 @@ class AsyncSearchTool(BaseTool):
         )
 
     def run_batch(self, calls: List[ToolCallRequest], **kwargs: Any) -> List[ToolCallResult]:
-        # 用 BaseTool 的包装器做“配额裁剪 + 实际执行”
         def _runner(allowed_calls: List[ToolCallRequest]) -> List[ToolCallResult]:
             if not allowed_calls:
                 return []
@@ -157,10 +156,9 @@ class AsyncSearchTool(BaseTool):
                             session,
                             flattened,
                             max_length=self.max_length,
-                            concurrency=self.detail_concurrency,  # 全局并发上限
+                            concurrency=self.detail_concurrency,  
                             proxy=self.proxy,
                         )
-                        # 回切回每个 query
                         enriched_lists: List[List[Dict[str, Any]]] = []
                         offset = 0
                         for L in lengths:
@@ -171,7 +169,7 @@ class AsyncSearchTool(BaseTool):
                                 offset += L
                         hits_lists = enriched_lists
                     except Exception:
-                        # 兜底：若后端在大批量一次性抓详情时失败，退回“每个 query 并发、跨 query 串行”的旧策略
+
                         enriched_lists: List[List[Dict[str, Any]]] = []
                         for hits in hits_lists:
                             if isinstance(hits, Exception) or not hits:

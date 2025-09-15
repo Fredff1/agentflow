@@ -41,6 +41,8 @@ def safe_apply_chat_template(
     add_generation_prompt: bool = True,
     **kwargs
 ) -> Tuple[Union[str,List[str]]:, bool]:
+    """Wrapper function for apply chat template to avoid exceptions for tokenizers without chat template
+    """
     has_method = hasattr(tokenizer, "apply_chat_template")
     if has_method:
         try:
@@ -51,10 +53,9 @@ def safe_apply_chat_template(
                 **kwargs,
             )
             return text, True
-        except Exception as e:  # 模板存在但使用失败（模板变量缺失等）
+        except Exception as e:  
             print(e)
             return default_trans_messages(messages), False
-    # 无模板：直接回退
     return default_trans_messages(messages), False
 
 
@@ -63,7 +64,6 @@ class ChatTemplateDefaultsMixin:
     _chat_template_defaults: Dict[str, Any]
 
     def __init__(self, *args, **kwargs):
-        # 子类若有多重继承，记得 super().__init__() 放在最后或调用顺序合适的地方
         self._chat_template_defaults = {}
         super().__init__(*args, **kwargs)
 
