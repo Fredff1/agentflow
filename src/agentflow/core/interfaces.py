@@ -1,7 +1,7 @@
 # src/core/interfaces.py
 from typing import List, Tuple, Dict, Any, Protocol, Sequence, Union
 from abc import ABC, abstractmethod
-from .types import Query, Rollout, Verdict
+
 
 class LLMBackend(ABC):
     

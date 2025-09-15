@@ -9,7 +9,6 @@ from typing import List, Dict, Any, Optional
 from agentflow.config import load_config
 from agentflow.utils.json_util import JsonUtil
 
-# 这两个类按你的实现导入路径来，如果你的路径不同请自行调整
 from agentflow.backend.vllm_logits import VllmChoiceLogitsBackend
 from agentflow.agent.basic import ToolDrivenAgent, AgentContext
 from agentflow.tools.caller import ToolCaller
@@ -58,32 +57,60 @@ call tools when needed to distinguish which answer is correct, and finally outpu
 
 
 SYSTEM_PROMPT_TOOL_NO_SEARCH = """
-You are a tool‑augmented reasoning expert to evaludate other assistents' answers towards specific questions.
+You are a tool-augmented math verifier.
 
 ## GOAL
-Given a requirment, a question, two assistants' answres with one correct and the other one wrong.Think step‑by‑step,
-call tools when needed to distinguish which answer is correct, and finally output <answer>true</answer> or <answer>false</answer>.
+Given a chat-like SEQUENCE that contains a math QUESTION and an ASSISTANT'S REASONING (and possibly a final answer), your job is to:
+1) write a concise verification text that inspects the given reasoning step-by-step (do not re-solve unless needed to falsify/confirm a specific step);
+2) decide whether the reasoning correctly solves the QUESTION;
+3) output a boolean verdict.
+
+You must prioritize verifying the original reasoning via minimal checks (algebraic legality, substitution, boundary/edge cases, numeric spot-checks). Prefer small, targeted <python> calls to verify computations, solve small subchecks, or find counterexamples. Do NOT provide a fresh full solution when the provided reasoning is wrong or incomplete.
+
+## TOOLS
+- You may use <python> ONLY for real calculations (symbolic/numeric). numpy as np, sympy, and math are pre-imported. You may import standard library modules only. No web search.
+- Each tool type can be used at most three times. Keep computations minimal (e.g., sympy.simplify for equalities; numeric sampling for inequalities; substitution to validate proposed solutions).
 
 ## ALLOWED TAGS
-• <think> … </think>  – private reasoning 
-  * In every <think>, restate the current micro-goal and the two most decisive rubric axes, update a compact ledger of knowns/unknowns/assumptions, then pick the smallest next step—either finalize a verdict (one-sentence reason) or propose one precise check.
-  * If new evidence just arrived, integrate only probative facts, note any conflicts and which side better fits the rubric, then decide again whether to conclude or run one minimal check.
-  * Progress rule: avoid repetition—each <think> must either add new evidence or tighten the verdict.
-• <rubric> … </rubric>  – evaluation criteria block; appears at most once 
-• <python> … </python> – Python code block 
-  * Code rules: left‑aligned; use print(...); no input(...), os.system(...), or infinite loops.  
-  * numpy as np, sympy and math are pre-imported and available. Other than the three above, you may manually import **standard library only**
-  * <python> is never for textual fact-checks, only real calculations.
-• <answer> … </answer> – final answer (exactly once per session)
+• <rubric> … </rubric> – required at the start; list decisive axes you’ll check (2–4 items).
+• <think> … </think>   – private reasoning exactly once; obey the progress rule (each step adds new evidence or tightens the verdict). Restate the micro-goal, list the two most decisive axes, keep a compact known/unknown ledger, and choose the smallest next step (conclude or propose one precise check).
+• <python> … </python> – optional; code must be left-aligned and use print(...); no input(...), os/system calls, or infinite loops. Use it only for computations.
+  * numpy as np, sympy and math are pre-imported and can be used directly. Other than the three above, you may manually import **standard library only**
+• <verify> … </verify> – public verification text (≈60–160 words or 5–10 bullets), focused on checking the given reasoning’s steps, domains, and edge cases.
+• <answer> … </answer> – final boolean verdict (true/false) exactly once.
 
 ## INTERACTION RULES
-1. Every assistant message **must** start with a <rubric> block.
-2. Each session should only contain one <think> tag
-3. In each round,after the <think> block, output is **either**  
-   a) one tool tag (<python>) **and nothing else** 
-   b) the final <answer> tag. 
-4. Each tool type can be used **at most three times** per session.  
-5. **NEVER** output incomplete tags to avoid format exceptions.
+1) Every assistant message must start with a <rubric> block.
+2) Each session should contain exactly one <think>.
+3) After the <think>, output is either:
+   a) one tool tag (<python>) and nothing else; OR
+   b) the final <verify> then <answer>.
+4) Progress rule: avoid repetition — each <think> update must add evidence or tighten the verdict.
+5) Failure policy: if any critical step is invalid, incomplete, or doesn’t answer the question, output <answer>false</answer>. When unsure, run one minimal <python> check before deciding.
+
+## EXTRACTION FROM SEQUENCE
+From the given SEQUENCE:
+- Treat the first clear user problem statement as QUESTION (or the block labeled like “Question/题目”).
+- Treat the assistant’s step-by-step as REASONING; if a final numeric/closed-form answer is present, treat it as the claimed result.
+- If the SEQUENCE is noisy, verify what’s explicitly claimed in the reasoning and whether it answers the QUESTION; do not manufacture new claims.
+
+## MATH-SPECIFIC RUBRIC AXES (choose those that fit)
+- Goal alignment; algebraic validity (no illegal cancellations/division by zero); theorem applicability (assumptions met);
+- Completeness & edge cases (branches, domain, extraneous roots); numeric sanity (spot-checks); final statement matches the question.
+
+"""
+
+USER_PROMPT="""
+The sequence for judge:
+{sequence}
+
+Your judgement:
+- Start with <rubric>…</rubric>.
+- Include exactly one <think>…</think>.
+- If you need a calculation to verify a step, after </think> output ONLY one <python>…</python> block (and nothing else) in this round.
+- Otherwise (or after the tool round), output:
+  <verify>…</verify>
+  <answer>true|false</answer>
 """
 
 
@@ -144,6 +171,7 @@ def flush_batch_and_write(
     output_path: str,
     *,
     first_write_mode: str,
+    include_full_meta: bool = True,
 ) -> str:
     """
     将一个“记录批次”的所有序列拉平，调用 scorer.score，然后按块拆回并写出。
@@ -165,6 +193,9 @@ def flush_batch_and_write(
     offset = 0
     for block, L in zip(batch_blocks, lens):
         block_out = dict(block)  # 不污染原对象
+        evaluations: List[Dict] = block_out.get("evaluations",None)
+        if not evaluations:
+            evaluations = [{}] * L
         if L == 0:
             block_scores: List[float] = []
             block_metas = []
@@ -172,9 +203,26 @@ def flush_batch_and_write(
             block_scores = scores[offset : offset + L]
             block_metas = metas[offset : offset + L]
         offset += L
+        
+        for eva, meta, score in zip(evaluations,block_metas,block_scores):
+            raw_text=meta["raw_text"]
+            eva["verify_text"]=raw_text
+            answer_tags = find_tags(raw_text,["answer"])
+            verify_tags = find_tags(raw_text,["verify"])
+            if answer_tags:
+                eva["judge"]=answer_tags[-1].body
+            else:
+                eva["judge"]=None
+            if verify_tags:
+                eva["verification"]=verify_tags[-1].body
+            else:
+                eva["verification"]=None
+            eva["score"]=score
 
-        block_out["scores"] = block_scores
-        block_out["metas"] = block_metas
+        block_out["evaluations"] = evaluations
+        if include_full_meta:
+            block_out["metas"] = block_metas
+
 
         if block_scores:
             best_idx = max(range(len(block_scores)), key=lambda i: block_scores[i])
@@ -206,6 +254,7 @@ def score_streaming(
     judge_system_path: Optional[str],
     judge_user_path: Optional[str],
     max_records: Optional[int],
+    include_full_meta: bool,
 ):
     ensure_parent_dir(output_path)
 
@@ -233,7 +282,7 @@ def score_streaming(
 
     # 2) 读取 judge 模板；若未提供则用 BoolLogitsGenerativeScorer 默认
     system_prompt = SYSTEM_PROMPT_TOOL_NO_SEARCH
-    user_prompt = None
+    user_prompt = USER_PROMPT
     if judge_system_path:
         with open(judge_system_path, "r", encoding="utf-8") as f:
             system_prompt = f.read()
@@ -271,6 +320,7 @@ def score_streaming(
                 batch_sequences_per_block,
                 output_path,
                 first_write_mode=write_mode,
+                include_full_meta=include_full_meta,
             )
             total += len(batch_blocks)
             batch_blocks.clear()
@@ -284,6 +334,7 @@ def score_streaming(
             batch_sequences_per_block,
             output_path,
             first_write_mode=write_mode,
+            include_full_meta=include_full_meta,
         )
         total += len(batch_blocks)
 
@@ -302,6 +353,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--judge-system-file", type=str, default=None, help="Optional system prompt file for the judge")
     p.add_argument("--judge-user-file", type=str, default=None, help="Optional user prompt file for the judge")
     p.add_argument("--max-records", type=int, default=None, help="Only process first N records")
+    p.add_argument("--include_full_meta", action="store_true", help="Write all inference meta to result")
     return p.parse_args()
 
 
@@ -317,6 +369,7 @@ def main():
         judge_system_path=args.judge_system_file,
         judge_user_path=args.judge_user_file,
         max_records=args.max_records,
+        include_full_meta=args.include_full_meta,
     )
 
 

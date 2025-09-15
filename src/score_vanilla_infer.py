@@ -8,11 +8,49 @@ from typing import List, Dict, Any, Optional
 
 from agentflow.config import load_config
 from agentflow.utils.json_util import JsonUtil
+from agentflow.utils.tag_util import find_tags
 
 # 这两个类按你的实现导入路径来，如果你的路径不同请自行调整
 from agentflow.backend.vllm_logits import VllmChoiceLogitsBackend
 from agentflow.inference.scorers.generative_scorer import BoolLogitsGenerativeScorer
 
+SYSTEM_PROMPT="""
+You are a math verifier with NO tool calls.
+
+## GOAL
+Given a chat-like SEQUENCE containing a math QUESTION and an ASSISTANT'S REASONING (and possibly a final answer), you must:
+1) write a concise verification text that inspects the given reasoning step-by-step (do not re-solve unless a single local derivation is trivially needed);
+2) decide whether the reasoning correctly solves the QUESTION;
+3) output a boolean verdict.
+
+You must prioritize checking the original reasoning via minimal paper checks: legality of algebraic steps, substitution mentally for proposed roots, domain and edge cases, theorem prerequisites, and consistency of the final statement with intermediate steps. Do NOT produce a fresh full solution when the provided reasoning is wrong or incomplete.
+
+## ALLOWED TAGS
+• <rubric> … </rubric>  – required at the start; list 2–4 decisive axes you’ll check.
+• <think> … </think>    – private reasoning exactly once; each update must add evidence or tighten the verdict (state micro-goal, the two most decisive axes, a compact known/unknown ledger, then choose the smallest next step: conclude or one precise mental check).
+• <verify> … </verify>  – public verification text (≈60–160 words or 5–10 bullets), focused on checking the given reasoning.
+• <answer> … </answer>  – final boolean verdict (true/false) exactly once.
+
+## INTERACTION RULES
+1) Every assistant message must start with a <rubric> block.
+2) The session contains exactly one <think>.
+3) After </think>, immediately output <verify> then <answer> in the same message. No tools, no extra text outside tags.
+4) Keep checks local to the provided steps; avoid lengthy recomputation. If a critical step cannot be justified by simple inspection, treat it as a failure.
+
+"""
+
+USER_PROMPT="""
+The sequence for judge:
+{sequence}
+
+Your judgement:
+- Start with <rubric>…</rubric>.
+- Include exactly one <think>…</think>.
+- If you need a calculation to verify a step, after </think> output ONLY one <python>…</python> block (and nothing else) in this round.
+- Otherwise (or after the tool round), output:
+  <verify>…</verify>
+  <answer>true|false</answer>
+"""
 
 def ensure_parent_dir(path: str):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -92,6 +130,9 @@ def flush_batch_and_write(
     offset = 0
     for block, L in zip(batch_blocks, lens):
         block_out = dict(block)  # 不污染原对象
+        evaluations: List[Dict] = block_out.get("evaluations",None)
+        if not evaluations:
+            evaluations = [{}] * L
         if L == 0:
             block_scores: List[float] = []
             block_metas = []
@@ -100,7 +141,23 @@ def flush_batch_and_write(
             block_metas = metas[offset : offset + L]
         offset += L
 
-        block_out["scores"] = block_scores
+        for eva, meta, score in zip(evaluations,block_metas,block_scores):
+            raw_text=meta["raw_text"]
+            eva["verify_text"]=raw_text
+            answer_tags = find_tags(raw_text,["answer"])
+            verify_tags = find_tags(raw_text,["verify"])
+            if answer_tags:
+                eva["judge"]=answer_tags[-1].body
+            else:
+                eva["judge"]=None
+            if verify_tags:
+                eva["verification"]=verify_tags[-1].body
+            else:
+                eva["verification"]=None
+            eva["score"]=score
+
+        # block_out["scores"] = block_scores
+        block_out["evaluations"] = evaluations
         block_out["metas"] = block_metas
 
         if block_scores:
@@ -141,8 +198,8 @@ def score_streaming(
     backend = VllmChoiceLogitsBackend(config)
 
     # 2) 读取 judge 模板；若未提供则用 BoolLogitsGenerativeScorer 默认
-    system_prompt = None
-    user_prompt = None
+    system_prompt = SYSTEM_PROMPT
+    user_prompt = USER_PROMPT
     if judge_system_path:
         with open(judge_system_path, "r", encoding="utf-8") as f:
             system_prompt = f.read()

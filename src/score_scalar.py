@@ -11,6 +11,7 @@ from agentflow.config import load_config
 from agentflow.utils.json_util import JsonUtil
 
 
+
 def ensure_parent_dir(path: str):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -119,14 +120,23 @@ def flush_batch_and_write(
     offset = 0
     for block, L in zip(batch_blocks, lens):
         block_out = dict(block)  # 避免污染原块
+        evaluations: List[Dict] = block_out.get("evaluations",None)
+        if not evaluations:
+            evaluations = [{}] * L
         if L == 0:
             block_scores: List[float] = []
+            block_metas = []
         else:
             block_scores = scores[offset: offset + L]
+            block_metas = metas[offset : offset + L]
         offset += L
 
-        block_out["scores"] = block_scores
-
+        for eva, meta, score in zip(evaluations,block_metas,block_scores):
+            eva["score"]=score
+            
+        block_out["evaluations"] = evaluations
+        block_out["metas"] = block_metas
+        
         # 可选：选出最佳样本（若存在）
         if block_scores:
             best_idx = max(range(len(block_scores)), key=lambda i: block_scores[i])
