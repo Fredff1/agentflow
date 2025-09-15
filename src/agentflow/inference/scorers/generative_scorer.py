@@ -7,6 +7,9 @@ class SupportLogitsScore(CanGenerate,CanChoiceProbs):
     ...
 
 class BoolLogitsGenerativeScorer(CanRMScores):
+    """A scorer based on bool-logits probability.The scorer first use generator to conduct 
+    LLM-as-Judge, then calclulate the log probability of producing "true" or "false" answer to give the final score
+    """
     
     DEFAULT_SYSTEM = """
 Given a question with an answer to it, you are required to think step by stepand judge whether the answer is correct

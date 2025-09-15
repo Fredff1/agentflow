@@ -12,6 +12,8 @@ from agentflow.tools.base import ToolParser
 from agentflow.utils.chat_template import is_chat_messages   
 
 class ToolDrivenAgent(CanGenerate):
+    """An agent with can conduct multi-turn generation with tool-usage
+    """
     def __init__(
         self,
         backend: CanGenerate,         
@@ -20,6 +22,14 @@ class ToolDrivenAgent(CanGenerate):
         *,     
         max_rounds: int = 6,    
     ):
+        """Initialize agent
+
+        Args:
+            backend (CanGenerate): Backend for basic generation
+            tool_caller (ToolCaller): Tool caller ti conduct tool-calls
+            finish_fn (Callable[[AgentContext],bool]): A function to decide when to finish multi-turn generation
+            max_rounds (int, optional): Max rounds for multi-turn generation. Defaults to 6.
+        """
         self.backend = backend
         self.tool_caller = tool_caller
         self.tool_parser = tool_caller.parser
@@ -71,36 +81,29 @@ class ToolDrivenAgent(CanGenerate):
             for j, i in enumerate(active):
                 has_calls = len(calls_per_text[j]) > 0
                 needs_tool_flags.append(has_calls)
-                # 若 finish_fn 判 True，直接结束（优先级更高）；否则若无工具，也结束
                 should_finish_flags.append(self.finish_fn(contexts[i]))
                 if (not has_calls) and (not self.finish_fn(contexts[i])):
-                    contexts[i].pop() # 没有工具，也没结束标志，则回溯对话
+                    contexts[i].pop() 
             
             for j, i in enumerate(active):
                 if should_finish_flags[j]:
                     finished[i] = True
 
-            # 过滤出需要调工具的样本子集
             to_call_local_indices: List[int] = [j for j in range(len(active)) if (not should_finish_flags[j]) and needs_tool_flags[j]]
             if not to_call_local_indices:
-                # 本轮剩余样本都已结束或不需要工具 → 检查是否全结束
                 if all(finished):
                     break
                 continue
 
-            # 将 round_counter 映射到 meta，供工具限额使用
             for j in to_call_local_indices:
                 i = active[j]
                 contexts[i].meta.setdefault("round_counter", {})
-                # 用 context 内的统计覆盖/补充 meta
                 contexts[i].meta["round_counter"].update(contexts[i].round_counters)
 
-            # 调用工具（只对需要的子集）
             sub_texts = [texts[j] for j in to_call_local_indices]
-            sub_metas = [backend_metas[j] for j in to_call_local_indices]  # 解析器 meta 传入
+            sub_metas = [backend_metas[j] for j in to_call_local_indices]  
             batch_results_sub: List[List[ToolCallResult]] = self.tool_caller.call_batch(sub_texts, sub_metas)
 
-            # 回填工具 observation、更新计数
             for k, j in enumerate(to_call_local_indices):
                 i = active[j]
                 results = batch_results_sub[k]

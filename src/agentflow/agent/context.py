@@ -18,7 +18,6 @@ class RoundBuffer:
 
     @property
     def full_text(self) -> str:
-        """按需拼接该轮消息文本（调试/日志用），不在状态里存字符串。"""
         parts = []
         for m in self.messages:
             name = f" ({m.name})" if getattr(m, "name", None) else ""
@@ -28,11 +27,7 @@ class RoundBuffer:
 
 @dataclass
 class AgentContext:
-    """
-    轻量跨-step上下文（非对话态），完全以 messages 为一等公民。
-    - prompt_messages: 初始上下文（如 system/user），外部传入后基本不改
-    - rounds: 分轮追加的消息（模型输出/工具观察/系统提示等）
-    - global_round: 当前轮索引
+    """Message based context for multi-turn generation
     """
     request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     step_index: int = 0
@@ -66,7 +61,7 @@ class AgentContext:
         name: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Message:
-        """向当前轮追加一条消息。"""
+        """Append a message for current round"""
         self._ensure_round_exists(self.global_round)
         msg = Message(role=role, content=content, name=name, metadata=metadata or {})
         self.rounds[self.global_round].messages.append(msg)
@@ -85,12 +80,12 @@ class AgentContext:
         return self.append(text, role="tool", name=name, metadata=metadata)
 
     def append_messages(self, msgs: List[Message]) -> None:
-        """批量把消息追加到当前轮。"""
+        """append multiple messages to current round"""
         self._ensure_round_exists(self.global_round)
         self.rounds[self.global_round].messages.extend(msgs)
 
     def pop(self) -> Optional[Message]:
-        """从最后一个非空轮中弹出最后一条消息。"""
+        """Pop the last non-empty message"""
         for r in range(len(self.rounds) - 1, -1, -1):
             if self.rounds[r].messages:
                 return self.rounds[r].messages.pop()
@@ -108,13 +103,14 @@ class AgentContext:
         return list(self.rounds[round_index].messages)
     
     def all_round_messages(self) -> List[Message]:
+        """Get all round messages"""
         msg_list = []
         for round in self.rounds:
             msg_list.extend(round.messages)
         return msg_list
 
     def all_messages(self) -> List[Message]:
-        """返回送入后端的完整消息序列：初始 + 各轮累积。"""
+        """Get all meesages (Include prompt and all round messages)"""
         out: List[Message] = list(self.prompt_messages)
         for rb in self.rounds:
             out.extend(rb.messages)

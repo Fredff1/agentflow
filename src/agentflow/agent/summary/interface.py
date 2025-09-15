@@ -8,6 +8,8 @@ from agentflow.common.messages import Message
 SummaryItem = Union[str, List[Message]]
 
 class SummarizerInterface(Protocol):
+    """An interface to summarize the giveb input
+    """
 
     def summarize(self, item: SummaryItem, **kwargs) -> Tuple[str, Dict[str, Any]]:
         ...

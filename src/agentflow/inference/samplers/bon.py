@@ -5,6 +5,8 @@ from typing import List, Tuple, Dict, Any, Optional
 from agentflow.core.interfaces import CanGenerate
 
 class BONSampler:
+    """Best-of-N sampler
+    """
    
 
     def __init__(
@@ -40,11 +42,10 @@ class BONSampler:
         if len(extra) != n_items:
             raise ValueError(f"`extra` length {len(extra)} must match prompts length {n_items}")
 
-        # ---- 扩展为平铺批次（每条prompt复制n份），并记录映射关系 ----
         flat_prompts: List = []
         flat_extra: List[Dict[str, Any]] = []
-        src_index_of_flat: List[int] = []     # 映射：平铺索引 -> 原prompt索引
-        sample_id_of_flat: List[int] = []     # 映射：平铺索引 -> 在该prompt下的样本序号
+        src_index_of_flat: List[int] = []    
+        sample_id_of_flat: List[int] = []     
 
         for i, (p, e) in enumerate(zip(prompts, extra)):
             base_extra = dict(e or {})
@@ -53,10 +54,8 @@ class BONSampler:
             for k in range(self.num_samples):
                 flat_prompts.append(p)
                 this_extra = dict(base_extra)
-                # 注入采样标识
                 this_extra["_source_index"] = i
                 this_extra["_sample_id"] = k
-                # 可选注入 seed
                 if self.seed_base is not None and (self.seed_key not in this_extra):
                     this_extra[self.seed_key] = int(self.seed_base + i * self.num_samples + k)
                 flat_extra.append(this_extra)
@@ -80,11 +79,9 @@ class BONSampler:
         else:
             _run_chunk(0, len(flat_prompts))
 
-        # ---- 聚合回二维结构：每条 prompt 一组样本 ----
         out_texts: List[List[str]] = [[] for _ in range(n_items)]
         out_metas: List[List[Dict[str, Any]]] = [[] for _ in range(n_items)]
 
-        # 为了稳定顺序，按 (source_index, sample_id) 排序回填
         ordering = list(range(len(flat_prompts)))
         ordering.sort(key=lambda idx: (src_index_of_flat[idx], sample_id_of_flat[idx]))
         for idx in ordering:
