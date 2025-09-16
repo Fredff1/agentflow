@@ -79,11 +79,14 @@ def flush_batch(
         out_record = dict(block)
         out_record["prompt"] = prompt_text
         out_record["samples"] = samples
+        out_record["type"] = "math"
 
         # 判分（若存在标准答案）
         gt = block.get(answer_field, None)
         if gt is not None:
             evaluations = evaluate_samples([_to_text(s) for s in samples], gt)
+            for idx, eva in enumerate(evaluations):
+                eva["idx"] = idx
             out_record["evaluations"] = evaluations
             num_correct = sum(1 for e in evaluations if e.get("correct"))
             out_record["num_correct"] = int(num_correct)

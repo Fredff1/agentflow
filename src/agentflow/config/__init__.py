@@ -39,7 +39,12 @@ rm_config={
     "head_type":"regression",
     "positive_class_index":0,
     "clip_range":[0,100.0],
-    "batch_size":None,
+    "batch_size":16,
+}
+
+hf_config = {
+    "device":"cuda",
+    "torch_dtype":"auto",
 }
 
 backend_config={
@@ -48,7 +53,11 @@ backend_config={
     "sampling":sampling_config,
     "vllm":vllm_config,
     "openai":openai_config,
+    "rm":rm_config,
+    "hf":hf_config,
 }
+
+
 
 FULL_CONFIG={
     "logging":logging_config,

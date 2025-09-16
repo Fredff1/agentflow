@@ -10,7 +10,6 @@ from agentflow.config import load_config
 from agentflow.utils.json_util import JsonUtil
 from agentflow.utils.tag_util import find_tags
 
-# 这两个类按你的实现导入路径来，如果你的路径不同请自行调整
 from agentflow.backend.vllm_logits import VllmChoiceLogitsBackend
 from agentflow.inference.scorers.generative_scorer import BoolLogitsGenerativeScorer
 
