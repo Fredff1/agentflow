@@ -1,237 +1,96 @@
-# python_execution_tool.py
+# agentflow/tools/python_execution_tool.py
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-import io
-import regex
-import pickle
-import traceback
-import copy
-import datetime
-import dateutil.relativedelta
-import multiprocess
-from multiprocess import Pool
-from typing import Any, Dict, Optional, List, Tuple
-from pebble import ProcessPool
-from tqdm import tqdm
-from concurrent.futures import TimeoutError as PebbleTimeoutError
-from functools import partial
-from timeout_decorator import timeout
-from contextlib import redirect_stdout
-import sympy
-import math
-from sympy import symbols, Eq, solve
-from scipy import optimize
+from typing import Any, Dict, List, Optional
+from dataclasses import asdict
 
 from agentflow.tools.base import BaseTool, ToolCallRequest, ToolCallResult
-
-
-def _safe_traceback(exc: BaseException, limit: int = 2) -> str:
-    lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
-    if len(lines) > limit:
-        lines = lines[: limit - 1] + ["... (truncated)\n"]
-    return "".join(lines)
-
-
-class GenericRuntime:
-    GLOBAL_DICT: Dict[str, Any] = {}
-    LOCAL_DICT: Optional[Dict[str, Any]] = None
-    HEADERS: List[str] = []
-
-    def __init__(self) -> None:
-        self._global_vars = copy.copy(self.GLOBAL_DICT)
-        self._local_vars = copy.copy(self.LOCAL_DICT) if self.LOCAL_DICT else None
-        for code_piece in self.HEADERS:
-            self.exec_code(code_piece)
-
-    def exec_code(self, code_piece: str) -> None:
-        pre_imports = """
-import numpy as np
-import sympy
-import math
-from sympy import symbols, Eq, solve
-x, y, z = sympy.symbols('x y z')
-"""
-        if regex.search(r'(\s|^)?input\(', code_piece) or regex.search(r'(\s|^)?os\.system\(', code_piece):
-            raise RuntimeError("Forbidden calls detected: input() / os.system()")
-
-        exec(pre_imports, self._global_vars)
-        exec(code_piece, self._global_vars)
-
-    def eval_code(self, expr: str) -> Any:
-        return eval(expr, self._global_vars)
-
-    def inject(self, var_dict: Dict[str, Any]) -> None:
-        self._global_vars.update(var_dict)
-
-    @property
-    def answer(self) -> Any:
-        return self._global_vars.get("answer")
-
-
-class DateRuntime(GenericRuntime):
-    GLOBAL_DICT = {
-        "datetime": datetime.datetime,
-        "timedelta": dateutil.relativedelta.relativedelta,
-        "relativedelta": dateutil.relativedelta.relativedelta,
-    }
-
-
-class CustomDict(dict):
-    def __iter__(self):
-        return list(super().__iter__()).__iter__()
-
-
-class ColorObjectRuntime(GenericRuntime):
-    GLOBAL_DICT = {"dict": CustomDict}
-
-
-# -------- Executor --------
-class PythonExecutor:
-    def __init__(
-        self,
-        runtime: Optional[Any] = None,
-        get_answer_symbol: Optional[str] = None,
-        get_answer_expression: Optional[str] = None,
-        capture_answer_from_stdout: bool = False,
-        timeout_length: int = 5,
-    ) -> None:
-        self.runtime = runtime if runtime else GenericRuntime()
-        self.answer_symbol = get_answer_symbol
-        self.answer_expression = get_answer_expression
-        self.capture_answer_from_stdout = capture_answer_from_stdout
-        self.process_pool = Pool(multiprocess.cpu_count())
-        self.timeout_length = timeout_length
-
-    @staticmethod
-    def execute(
-        code: Any,
-        capture_answer_from_stdout: Optional[bool] = None,
-        runtime: Optional[Any] = None,
-        answer_symbol: Optional[str] = None,
-        answer_expression: Optional[str] = None,
-        timeout_length: int = 10,
-    ) -> Tuple[Any, str]:
-        try:
-            if isinstance(code, list):
-                code = "\n".join(code)
-            code = str(code).strip()
-
-            if capture_answer_from_stdout:
-                program_io = io.StringIO()
-                with redirect_stdout(program_io):
-                    timeout(timeout_length)(runtime.exec_code)(code)
-                program_io.seek(0)
-                result = program_io.read()
-            elif answer_symbol:
-                timeout(timeout_length)(runtime.exec_code)(code)
-                result = runtime._global_vars[answer_symbol]
-            elif answer_expression:
-                timeout(timeout_length)(runtime.exec_code)(code)
-                result = timeout(timeout_length)(runtime.eval_code)(answer_expression)
-            else:
-                lines = code.split("\n")
-                if len(lines) > 1:
-                    exec_code = "\n".join(lines[:-1])
-                    eval_code = lines[-1]
-                    timeout(timeout_length)(runtime.exec_code)(exec_code)
-                    result = timeout(timeout_length)(runtime.eval_code)(eval_code)
-                else:
-                    result = timeout(timeout_length)(runtime.eval_code)(code)
-
-            report = "Execution Success"
-
-            try:
-                pickle.dumps(result)
-            except (pickle.PicklingError, TypeError):
-                try:
-                    result = str(result)
-                except Exception:
-                    result = f"<unprintable object of type {type(result).__name__}>"
-
-        except Exception as e:
-            result = ""
-            report = f"Execution Failed\n{type(e).__name__}: {str(e)}\nTraceback: {_safe_traceback(e)}"
-        return result, report
-
-    @staticmethod
-    def _truncate(text: str, max_length: int = 400) -> str:
-        if len(text) <= max_length:
-            return text
-        half = max_length // 2
-        return text[:half] + "..." + text[-half:]
-
-    def apply(self, code: str) -> Tuple[str, str]:
-        return self.batch_apply([code])[0]
-
-    def batch_apply(self, batch_code: List[str]) -> List[Tuple[str, str]]:
-        all_code_snippets: List[List[str]] = [c.split("\n") for c in batch_code]
-
-        all_exec_results: List[Tuple[Any, str]] = []
-        with ProcessPool(max_workers=min(len(all_code_snippets), os.cpu_count())) as pool:
-            executor = partial(
-                self.execute,
-                capture_answer_from_stdout=self.capture_answer_from_stdout,
-                runtime=self.runtime,
-                answer_symbol=self.answer_symbol,
-                answer_expression=self.answer_expression,
-                timeout_length=self.timeout_length,
-            )
-            future = pool.map(executor, all_code_snippets, timeout=self.timeout_length)
-            iterator = future.result()
-
-            progress_bar = tqdm(total=len(all_code_snippets), desc="Execute") if len(all_code_snippets) > 100 else None
-            while True:
-                try:
-                    result = next(iterator)
-                    all_exec_results.append(result)
-                except StopIteration:
-                    break
-                except PebbleTimeoutError:
-                    all_exec_results.append(("", "Timeout Error"))
-                except Exception:
-                    raise
-                if progress_bar is not None:
-                    progress_bar.update(1)
-            if progress_bar is not None:
-                progress_bar.close()
-
-        batch_results: List[Tuple[str, str]] = []
-        for (res, report) in all_exec_results:
-            res_s = self._truncate(str(res).strip())
-            rep_s = self._truncate(str(report).strip())
-            batch_results.append((res_s, rep_s))
-        return batch_results
-
+from agentflow.tools.code.sandbox.python_executor import PythonExecutor, ExecPlan
+from agentflow.tools.code.sandbox.python_sandbox import SandboxConfig
 
 class PythonExecutionTool(BaseTool):
-    """Execute Python code safely with optional stdout capture.
-    """
+    """Execute Python code in a controlled sandbox with extensible context & helpers."""
     name = "python"
-    description = "Execute Python code safely with optional stdout capture."
+    description = "Execute Python code safely with optional stdout capture, headers/context/helpers injection."
 
-    def __init__(self, *, timeout_length: int = 5, config: Optional[Dict[str, Any]] = None, max_rounds: int = 3):
-        super().__init__(config=config,max_rounds=max_rounds)
-        self.executor = PythonExecutor(
-            runtime=GenericRuntime(),
-            get_answer_symbol=None,
-            get_answer_expression=None,
-            capture_answer_from_stdout=True,
-            timeout_length=timeout_length,
+    def __init__(self,
+                 *,
+                 timeout_length: int = 5,
+                 mem_limit_mb: int = 256,
+                 allowed_imports: Optional[List[str]] = None,
+                 truncate_len: int = 600,
+                 config: Optional[Dict[str, Any]] = None,
+                 max_rounds: int = 3,
+                 headers: Optional[List[str]] = None,
+                 context: Optional[Dict[str, Any]] = None,
+                 helper_modules: Optional[List[Dict[str, Any]]] = None,
+                 helpers: Optional[Dict[str, Any]] = None):
+        super().__init__(config=config, max_rounds=max_rounds)
+
+        sconf = SandboxConfig(
+            time_limit_s=float(timeout_length),
+            mem_limit_mb=int(mem_limit_mb),
+            allowed_imports=allowed_imports,
+            truncate_len=int(truncate_len),
         )
+        self.executor = PythonExecutor(config=sconf)
+        if headers: 
+            self.executor.set_headers(headers)
+        if context: 
+            self.executor.set_context(context)
+
+        if helper_modules:
+            for spec in helper_modules:
+                mod = spec.get("module")
+                names = spec.get("names")
+                alias = spec.get("alias")
+                if mod:
+                    self.executor.inject_from_module(mod, names=names, alias=alias)
+
+        if helpers:
+            self.executor.inject_helpers(helpers)
+
+    def register_header(self, code_piece: str) -> None:
+        self.executor.register_header(code_piece)
+
+    def update_context(self, ctx: Dict[str, Any]) -> None:
+        self.executor.set_context(ctx)
+
+    def register_helpers_from_module(self, module: str, names: Optional[List[str]] = None,
+                                     alias: Optional[Dict[str, str]] = None) -> None:
+        self.executor.inject_from_module(module, names=names, alias=alias)
+
+    def register_helpers_from_code(self, code: str, export: Optional[List[str]] = None,
+                                   alias: Optional[Dict[str, str]] = None) -> None:
+        self.executor.inject_from_code(code, export=export, alias=alias)
+
+    def register_helpers(self, helpers: Dict[str, Any]) -> None:
+        self.executor.inject_helpers(helpers)
 
     def run_one(self, call: ToolCallRequest, **kwargs: Any) -> ToolCallResult:
         if self._is_quota_exceeded(call):
             return self._make_exceeded_result(call)
 
-        code_text = str(call.content)
-        result, report = self.executor.apply(code_text)
-        meta = {"success": report.startswith("Execution Success"), "report": report}
+        meta = call.meta or {}
+        cap = meta.get("capture_mode", "stdout")
+        symbol = meta.get("answer_symbol")
+        expr = meta.get("answer_expr")
+        plan = ExecPlan(code=str(call.content), capture_mode=cap, answer_symbol=symbol, answer_expr=expr)
+        res = self.executor.run(plan)
+
+        out = f"Console: {res.stdout}\nResult: {res.result}"
+        rep = "Execution Success" if res.ok else f"Execution Failed\n{res.error}"
+        meta_out = {
+            "success": bool(res.ok),
+            "error": res.error,
+            "duration_s": res.duration_s
+        }
         return ToolCallResult(
             tool_name=self.name,
             request_content=call.content,
-            output=f"Console: {result}\n Report: {report}",
-            meta=meta,
+            output=out + f"\nReport: {rep}",
+            meta=meta_out,
             error=None,
             index=call.index,
             call=call,
@@ -241,21 +100,27 @@ class PythonExecutionTool(BaseTool):
         def _runner(allowed_calls: List[ToolCallRequest]) -> List[ToolCallResult]:
             if not allowed_calls:
                 return []
-            results = self.executor.batch_apply([str(c.content) for c in allowed_calls])
-            metas = [{"success": rep.startswith("Execution Success"), "report": rep} for (_, rep) in results]
+            plans = []
+            for c in allowed_calls:
+                meta = c.meta or {}
+                plans.append(ExecPlan(code=str(c.content),
+                                      capture_mode=meta.get("capture_mode", "stdout"),
+                                      answer_symbol=meta.get("answer_symbol"),
+                                      answer_expr=meta.get("answer_expr")))
+            results = self.executor.run_many(plans, show_progress=len(plans)>100)
             packed: List[ToolCallResult] = []
-            for (out, rep), c, m in zip(results, allowed_calls, metas):
-                packed.append(
-                    ToolCallResult(
-                        tool_name=self.name,
-                        request_content=c.content,
-                        output=f"Console: {out}\n Report: {rep}",
-                        meta=m,
-                        error=None,
-                        index=c.index,
-                        call=c,
-                    )
-                )
+            for res, c in zip(results, allowed_calls):
+                out = f"Console: {res.stdout}\nResult: {res.result}"
+                rep = "Execution Success" if res.ok else f"Execution Failed\n{res.error}"
+                meta_out = {"success": bool(res.ok), "error": res.error, "duration_s": res.duration_s}
+                packed.append(ToolCallResult(
+                    tool_name=self.name,
+                    request_content=c.content,
+                    output=out + f"\nReport: {rep}",
+                    meta=meta_out,
+                    error=None,
+                    index=c.index,
+                    call=c,
+                ))
             return packed
-
         return self._apply_round_quota(calls, _runner)
