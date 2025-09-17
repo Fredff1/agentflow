@@ -45,8 +45,7 @@ The sequence for judge:
 Your judgement:
 - Start with <rubric>…</rubric>.
 - Include exactly one <think>…</think>.
-- If you need a calculation to verify a step, after </think> output ONLY one <python>…</python> block (and nothing else) in this round.
-- Otherwise (or after the tool round), output:
+- Output:
   <verify>…</verify>
   <answer>true|false</answer>
 """

@@ -12,22 +12,24 @@ from agentflow.tools.base import ToolParser
 from agentflow.utils.chat_template import is_chat_messages   
 
 class ToolDrivenAgent(CanGenerate):
-    """An agent with can conduct multi-turn generation with tool-usage
+    """An agent which can conduct multi-turn generation with tool-usage
     """
     def __init__(
         self,
         backend: CanGenerate,         
         tool_caller: ToolCaller,  
         finish_fn: Callable[[AgentContext],bool],
+        error_fn: Optional[Callable[[AgentContext],bool]] = None,
         *,     
         max_rounds: int = 6,    
     ):
         """Initialize agent
-
+        
         Args:
             backend (CanGenerate): Backend for basic generation
             tool_caller (ToolCaller): Tool caller ti conduct tool-calls
-            finish_fn (Callable[[AgentContext],bool]): A function to decide when to finish multi-turn generation
+            finish_fn (Callable[[AgentContext],bool]): A function to decide when to finish multi-turn generation.It returns true when geneation is over.
+            error_fn (Optional[Callable[[AgentContext],bool]], optional): A function to decide when an output is invalid and requires roll-back.It returns true when finding an invalid generation Defaults to None.
             max_rounds (int, optional): Max rounds for multi-turn generation. Defaults to 6.
         """
         self.backend = backend
@@ -35,6 +37,7 @@ class ToolDrivenAgent(CanGenerate):
         self.tool_parser = tool_caller.parser
         self.max_rounds = max_rounds
         self.finish_fn = finish_fn
+        self.error_fn = error_fn
 
     def generate(
         self, 
@@ -83,7 +86,8 @@ class ToolDrivenAgent(CanGenerate):
                 needs_tool_flags.append(has_calls)
                 should_finish_flags.append(self.finish_fn(contexts[i]))
                 if (not has_calls) and (not self.finish_fn(contexts[i])):
-                    contexts[i].pop() 
+                    if self.error_fn and self.error_fn(contexts[i]):
+                        contexts[i].pop() 
             
             for j, i in enumerate(active):
                 if should_finish_flags[j]:

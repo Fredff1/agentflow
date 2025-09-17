@@ -20,83 +20,63 @@ from agentflow.tools.code.python_execution import PythonExecutionTool
 from agentflow.inference.scorers.generative_scorer import BoolLogitsGenerativeScorer
 from agentflow.utils.tag_util import find_tags
 
-SYSTEM_PROMPT_TOOL="""
-You are a tool‑augmented reasoning expert to evaludate other assistents' answers towards specific questions.
 
-## GOAL
-Given a requirment, a question, two assistants' answres with one correct and the other one wrong.Think step‑by‑step,
-call tools when needed to distinguish which answer is correct, and finally output <answer>true</answer> or <answer>false</answer>.
-
-## ALLOWED TAGS
-• <think> … </think>  – private reasoning 
-  * In every <think>, restate the current micro-goal and the two most decisive rubric axes, update a compact ledger of knowns/unknowns/assumptions, then pick the smallest next step—either finalize a verdict (one-sentence reason) or propose one precise check.
-  * If new evidence just arrived, integrate only probative facts, note any conflicts and which side better fits the rubric, then decide again whether to conclude or run one minimal check.
-  * Progress rule: avoid repetition—each <think> must either add new evidence or tighten the verdict.
-• <rubric> … </rubric>  – evaluation criteria block; appears at most once 
-• <search> … </search> – web search query 
-  * single precise query only
-  * trigger ONLY if the fact is time-sensitive/non-trivial
-  * SKIP if answerable from provided context, common knowledge, or computable
-  * prefer to use structure as "[entity/topic] [specific claim/number] [constraint: time/domain]"
-  * avoid vague verbs like “verify/is it true” and direct url in queries;avoid duplicate queies.
-• <python> … </python> – Python code block 
-  * Code rules: left‑aligned; use print(...); no input(...), os.system(...), or infinite loops.  
-  * numpy as np, sympy and math are pre-imported and available. Other than the three above, you may manually import **standard library only**
-  * <python> is never for textual fact-checks, only real calculations.
-• <answer> … </answer> – final answer (exactly once per session)
-
-## INTERACTION RULES
-1. Every assistant message **must** start with a <rubric> block.
-2. Each session should only contain one <think> tag
-3. In each round,after the <think> block, output is **either**  
-   a) one tool tag (<search> or <python>) **and nothing else** 
-   b) the final <answer> tag. 
-4. Each tool type can be used **at most three times** per session.  
-5. **NEVER** output incomplete tags to avoid format exceptions.
-"""
 
 
 SYSTEM_PROMPT_TOOL_NO_SEARCH = """
 You are a tool-augmented math verifier.
-## GOAL
-From a chat-like SEQUENCE (QUESTION + ASSISTANT’S REASONING), write a concise verification text and decide if the reasoning correctly solves the QUESTION. Do not re-solve unless a small subcheck is needed.
 
-## TOOLS
-Optional <python> for real calculations only; numpy as np, sympy, and math are pre-imported; standard library only; no web. Use at most 3 times; keep code minimal (e.g., simplify, substitution checks, small solves, coarse sampling).
+GOAL
+From a chat-like SEQUENCE (QUESTION + ASSISTANT’S REASONING), verify step-by-step whether the reasoning solves the QUESTION. Prefer minimal checks; do NOT re-solve unless a tiny subcheck is strictly required.
 
-## ALLOWED TAGS
-* <rubric>…</rubric> list 2–4 decisive axes you’ll check.
-* <think>…</think> exactly once; restate the micro-goal, two key axes, a brief known/unknown ledger; pick the smallest next step (conclude or one precise check).
-* <python>…</python> left-aligned code using print(...); no input/os/system/infinite loops.
-* <verify>…</verify> 60–160 words; check the given steps (legality, domains, edges), not a fresh full solution.
-* <answer>true|false</answer> exactly once.
+TOOLS
+You may emit at most 3 <python>…</python> blocks total. Use ONLY for calculations with math/sympy/standard lib (no numpy, no input/os/system/loops).
+Preloaded helpers callable inside <python>:
 
-## INTERACTION RULES
-* Start every message with <rubric>. 2) Use exactly one <think>.
-* After </think>, output either (a) one <python> and nothing else; or (b) <verify> then <answer>.
-* No repetition: each <think> must add evidence or tighten the verdict.
-* Failure policy: if a critical step is invalid/incomplete/doesn’t answer the question → <answer>false</answer>.
-* Format: never place <verify>/<answer> inside <rubric>; no extra text outside tags.
+* is_int(x), is_rational(x), simplify_str(s)
+* nCk(n,k), nPk(n,k), factors(n)->dict, prime_list(N)
+* mod_inv(a,m), crt_pair(a1,m1,a2,m2)
+* eval_poly(coeffs,x), roots_quadratic(a,b,c)
+* check_equal_expr(lhs,rhs), sample_check(expr, [{'x':1}, …])
 
-## EXTRACTION FROM SEQUENCE
-* Take the first clear user problem as QUESTION; treat the assistant’s step-by-step as REASONING; any final value is the claimed result. If the sequence is noisy, verify only explicit claims relevant to the QUESTION.
+ALLOWED TAGS
 
-## MANDATORY INTENT CHECK (must appear first inside <verify>)
-* WHAT (from QUESTION): quote the exact quantity/condition requested (e.g., “find N mod m”, “minimum value”, “count of solutions on (a,b)”).
-* RESULT (from REASONING): quote what the assistant actually computed/claimed.
-* MATCH RULE: if WHAT ≠ RESULT in object, domain, constraints, or required form (e.g., modulus/interval/type), output <answer>false</answer>.
-* PREMISES AUDIT: list key premises as Given: […] vs Introduced: […]. If any Introduced premise is essential to the conclusion, output <answer>false</answer>.
-* ANSWER-FORM CHECK: confirm the claimed result matches the required format/range (integer, simplest radical, mod m residue, probability ∈[0,1], etc.); mismatch ⇒ false.
+* <rubric>…</rubric> — round 1 only; list 2–4 decisive axes.
+* <step>…</step> — exactly one per round: state micro-goal, two key axes, and a brief Known/Unknown ledger; be non-repetitive.
+* <python>…</python> — optional tool call for THIS round.
+* <verify>…</verify> — 60–140 words; start with the intent check; then 2–4 minimal checks.
+* <answer>true|false</answer> — final verdict, exactly once in the whole session.
+* <next>…</next> — “continue to the next round”.
 
-## MANDATORY VERIFICATION HABITS (general)
-* V1 Transformations: check algebraic legality (no illegal cancellations/division by zero), identities, and stated assumptions.
-* V2 Counting/solutions: when equations use a transformed variable, change variables, track interval changes, handle boundary/special cases separately.
-* V3 Composition & tangency: if f(x)=φ(g(x)), zeros come from φ(·)=0; tangency requires the intersection f=0 and f′=0 (evaluate f′ on the zero set).
-* V4 Numeric sanity: use tiny spot-checks (substitution/residuals/monotonicity samples) to corroborate or refute a step.
-* V5 Acceptance: if key evidence (Intent check or V1–V4) is missing, run one minimal <python> or output <answer>false</answer>.
+INTERACTION RULES
 
-## RUBRIC AXES (choose 2–4)
-* Goal alignment; algebraic legality; completeness & edge cases; numeric sanity; final statement matches the question.
+* Use ≤ 4 rounds. Round 1 must contain <rubric> and one <step>. Rounds 2..K: one <step>.
+* After </step>, output EXACTLY ONE of: <python>…</python> OR <next/> OR (<verify>…</verify><answer>…</answer>).
+* Progress rule: each <step> must add NEW evidence or tighten the verdict; no repetition.
+* Failure policy: if WHAT≠RESULT (object/domain/form) or the result violates the required format/range, or an introduced premise is essential, immediately output <verify>…</verify><answer>false</answer>.
+* Never output incomplete tags.
+
+ROUND PLAN (follow unless early termination)
+
+• Step 1 — Intent & object check:
+Extract WHAT (exact requested quantity/constraints) and RESULT (what the assistant actually computed/claimed).
+Decide MATCH: yes/no and FORMAT: ok/bad (mod range, interval, integer/radical form, probability in [0,1], etc.).
+If mismatch or bad format → conclude false.
+• Step 2 — Premises & modeling audit:
+List Given[…] vs Introduced[…]; map any variable transforms and intervals (track endpoints/special cases).
+If an introduced premise is used critically → conclude false.
+• Step 3 — Critical-step verification (minimal compute):
+Pick ONE decisive equation/identity/inequality from the reasoning; validate via simplify/ substitution/ tiny sampling.
+• Step 4 — Edges & finalize:
+Check boundaries/branches/monotonicity claims that affect correctness. If all pass, produce <verify> then <answer>.
+
+MANDATORY INTENT CHECK (FIRST lines inside <verify>)
+WHAT: …
+RESULT: …
+MATCH: yes/no
+FORMAT: ok/bad
+PREMISES: Given=[…]; Introduced=[…]
+
 """
 
 USER_PROMPT="""
@@ -112,6 +92,99 @@ Your judgement:
   <answer>true|false</answer>
 """
 
+HELPERS_MATH = r"""
+import math
+import sympy as sp
+from sympy import Integer, Rational, symbols, Eq, simplify, factorint
+
+def is_int(x):
+    try:
+        return bool(Integer(x) == int(x))
+    except Exception:
+        try:
+            return bool(sp.Integer(sp.nsimplify(x)) == int(sp.nsimplify(x)))
+        except Exception:
+            return False
+
+def is_rational(x):
+    try:
+        sp.nsimplify(x)
+        return True
+    except Exception:
+        return False
+
+def nCk(n, k):
+    n, k = int(n), int(k)
+    if k < 0 or k > n: return 0
+    return math.comb(n, k)
+
+def nPk(n, k):
+    n, k = int(n), int(k)
+    if k < 0 or k > n: return 0
+    out = 1
+    for i in range(k):
+        out *= (n - i)
+    return out
+
+def factors(n: int):
+    return dict(factorint(int(n)))
+
+def prime_list(nmax: int):
+    return list(sp.primerange(2, int(nmax)+1))
+
+def mod_inv(a: int, m: int):
+    a, m = int(a), int(m)
+    g, x, y = sp.gcdex(a, m)
+    if g != 1:
+        raise ValueError("No modular inverse")
+    return int(x % m)
+
+def crt_pair(a1, m1, a2, m2):
+    sol = sp.ntheory.modular.crt([int(m1), int(m2)], [int(a1)%int(m1), int(a2)%int(m2)])
+    if sol is None: 
+        raise ValueError("CRT infeasible")
+    return int(sol[0]), int(sol[1])
+
+def eval_poly(coeffs, x):
+    # coeffs: highest degree first
+    val = 0
+    for c in coeffs:
+        val = val * x + c
+    return val
+
+def roots_quadratic(a,b,c):
+    a,b,c = map(sp.nsimplify, (a,b,c))
+    x = sp.symbols('x')
+    sol = sp.solve(sp.Eq(a*x**2 + b*x + c, 0), x)
+    return sol
+
+def simplify_str(expr_str: str) -> str:
+    try:
+        e = sp.sympify(expr_str)
+        return str(sp.simplify(e))
+    except Exception:
+        return expr_str
+
+def check_equal_expr(lhs_str: str, rhs_str: str) -> bool:
+    try:
+        lhs = sp.simplify(sp.sympify(lhs_str))
+        rhs = sp.simplify(sp.sympify(rhs_str))
+        return bool(sp.simplify(lhs - rhs) == 0)
+    except Exception:
+        return False
+
+def sample_check(expr_str: str, subs_list):
+    # subs_list: [{'x':1,'y':2}, ...]
+    try:
+        e = sp.sympify(expr_str)
+        out = []
+        for subs in subs_list:
+            val = e.subs({sp.symbols(k): v for k, v in subs.items()})
+            out.append(sp.N(val))
+        return out
+    except Exception as ex:
+        return [f'ERR:{ex}']
+"""
 
 def ensure_parent_dir(path: str):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -263,13 +336,7 @@ def score_streaming(
     registry = ToolRegistry()
     # search_tool = AsyncSearchTool(SearxngBackend("http://127.0.0.1:8888"))
     py_tool = PythonExecutionTool()
-    py_tool.register_helpers_from_code(
-    """
-import math
-import numpy as np
-import sympy
-    """
-    )
+    py_tool.register_helpers_from_code(HELPERS_MATH)
     # registry.register(search_tool)
     registry.register(py_tool)
     parser = TagToolParser()
@@ -280,10 +347,19 @@ import sympy
         if tags:
             return True
         return False
+    
+    def _error_gen(context: AgentContext):
+        msg = context.last_message()
+        tags = find_tags(msg.content,["answer","python","next"])
+        if tags:
+            return False
+        return True
+    
     agent = ToolDrivenAgent(
         backend=backend,
         tool_caller=caller,
         finish_fn=_finish_gen,
+        error_fn=_error_gen
     )
 
     # 2) 读取 judge 模板；若未提供则用 BoolLogitsGenerativeScorer 默认
